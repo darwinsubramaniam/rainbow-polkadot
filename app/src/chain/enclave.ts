@@ -109,3 +109,24 @@ export const attest = (
   k: number,
   inputLog: LogEntry[],
 ) => call<Attestation>(base, "/attest", { player, epoch, k, inputLog });
+
+/**
+ * The three calls the app makes, with the endpoint already bound.
+ *
+ * Stated as an interface so the app can be pointed at something that is not a
+ * live tunnel: `mock.ts` implements the same three calls in the browser tab for
+ * development. The play/attest flow therefore holds an `Enclave` rather than a
+ * URL, and needs no branch on which one it was handed.
+ */
+export interface Enclave {
+  identity(): Promise<Identity>;
+  openSession(player: string, k: number): Promise<Session>;
+  attest(player: string, epoch: number, k: number, inputLog: LogEntry[]): Promise<Attestation>;
+}
+
+/** The real one: an Acurast job answering behind an HTTPS tunnel. */
+export const remote = (base: string): Enclave => ({
+  identity: () => identity(base),
+  openSession: (player, k) => openSession(base, player, k),
+  attest: (player, epoch, k, inputLog) => attest(base, player, epoch, k, inputLog),
+});

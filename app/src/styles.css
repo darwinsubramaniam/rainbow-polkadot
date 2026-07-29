@@ -394,7 +394,37 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   margin-bottom: .2rem;
 }
 .overlay .dim { color: var(--screen-dim); }
+.overlay .ok { color: #7ee0a8; }
+.overlay .bad,
 .overlay.bad { color: #ff8f8f; }
+
+/**
+ * The controls, on the screen rather than under it.
+ *
+ * They have to be here: the cabinet is what goes fullscreen, so a Play or
+ * Attest button living in the page below is unreachable exactly when the game
+ * is most playable. Buttons grow in fullscreen, where the nearest input is a
+ * thumb rather than a mouse.
+ */
+.overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .55rem;
+  margin: .6rem 0 .2rem;
+}
+.overlay-actions button.ghost {
+  background: transparent;
+  color: var(--screen-ink);
+  border-color: var(--screen-line);
+}
+.overlay-actions button.ghost:hover:not(:disabled) {
+  background: #161c28;
+  border-color: #2b3547;
+  color: #fff;
+}
+.cabinet:fullscreen .overlay-actions { gap: .8rem; margin-top: .9rem; }
+.cabinet:fullscreen .overlay-actions button { font-size: 1rem; padding: .7rem 1.4rem; }
 .overlay kbd {
   background: #161c28;
   border-color: var(--screen-line);
@@ -455,7 +485,18 @@ input {
 }
 input:hover { border-color: #c6d3e1; }
 input:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
+input:disabled { opacity: .5; cursor: not-allowed; }
+input:disabled:hover { border-color: var(--line); }
 #slot { width: 5rem; }
+
+/* The dev switch: the button keeps its size, the explanation takes the rest. */
+.dev-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.dev-row .hint { flex: 1 1 16rem; line-height: 1.5; }
+.dev-row button[aria-pressed="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-wash);
+}
 
 .identity {
   display: flex;

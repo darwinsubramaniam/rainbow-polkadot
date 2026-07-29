@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ProductSDKContext } from "@parity/product-sdk/react";
 
 import { useGame } from "./game/useGame";
-import { attest, identity, openSession, type Attestation, type Identity } from "./chain/enclave";
+import { remote, type Attestation, type Enclave, type Identity } from "./chain/enclave";
 import {
   localEpoch,
   minutesToReset,
@@ -58,7 +58,25 @@ export function Play() {
   // pasted tunnel hostname. There was previously a separate uncommitted draft,
   // which meant a URL typed but never submitted was simply lost.
   const [verifier, setVerifier] = useStoredString("rainbow.verifier", DEFAULT_VERIFIER);
-  const [record, setRecord] = useStoredJson<SessionRecord | null>("rainbow.session", null);
+
+  // Dev only: an enclave that answers from this tab instead of a deployed job.
+  // Persisted so a reload does not silently put the app back on a tunnel that
+  // is not running. `simulating` is the value everything else reads — a build
+  // resolves `import.meta.env.DEV` to false, so a stale stored `true` cannot
+  // switch the simulator on in production.
+  const [simulated, setSimulated] = useStoredJson("rainbow.simulate", false);
+  const [sim, setSim] = useState<Enclave | null>(null);
+  const simulating = import.meta.env.DEV && simulated;
+
+  // One session record per enclave. A seed the simulator issued means nothing
+  // to the deployed one — each derives its own from its own key — so a held run
+  // must never be replayed or attested against the other, and the attempt
+  // budgets are likewise unrelated. Separate slots are what make flipping the
+  // switch safe rather than a source of mystifying score disagreements.
+  const liveRecord = useStoredJson<SessionRecord | null>("rainbow.session", null);
+  const simRecord = useStoredJson<SessionRecord | null>("rainbow.session.sim", null);
+  const [record, setRecord] = simulating ? simRecord : liveRecord;
+
   const [session, setSession] = useState<Active | null>(null);
   const [enclave, setEnclave] = useState<Identity | null>(null);
   const [attestation, setAttestation] = useState<Attestation | null>(null);
@@ -82,6 +100,25 @@ export function Play() {
     say("running standalone — play and attestation work, on-chain submit does not.", "info");
   }, [app, say]);
 
+  // Pull the simulator in only when it is actually switched on, and only in a
+  // dev build. The dynamic import is what keeps it out of the bundle: the
+  // branch is statically false in production, so nothing references the chunk.
+  useEffect(() => {
+    if (!import.meta.env.DEV || !simulated || sim) return;
+
+    let live = true;
+    void import("./chain/mock")
+      .then((m) => {
+        if (live) setSim(m.simulatedEnclave());
+      })
+      .catch((e: unknown) => {
+        say(`simulator failed to load: ${e instanceof Error ? e.message : String(e)}`, "bad");
+      });
+    return () => {
+      live = false;
+    };
+  }, [simulated, sim, say]);
+
   const account = signer.selectedAccount ?? signer.accounts[0] ?? null;
   // The H160 pallet-revive maps this account to. It is what the contract
   // credits AND what the enclave hashes into sessionId, so it must be derived
@@ -100,9 +137,19 @@ export function Play() {
   const canReplay = next.mode === "replay";
   const exhausted = next.mode === "exhausted";
 
+  /**
+   * The enclave this run talks to, or null with the reason it is not ready.
+   *
+   * Resolved per call rather than held in state: the simulator arrives
+   * asynchronously and the URL is edited as it is typed, so a value captured
+   * at render would be the stale one exactly when it matters.
+   */
+  const endpoint = (): Enclave | null => (simulating ? sim : verifier.trim() ? remote(verifier.trim()) : null);
+  const notReady = () => (simulating ? "the simulator is still loading…" : "set the verifier URL first");
+
   const play = useCallback(async () => {
-    const base = verifier.trim();
-    if (!base) return say("set the verifier URL first", "bad");
+    const api = endpoint();
+    if (!api) return say(notReady(), "bad");
     if (!player) return say("connect a wallet first — the seed is bound to your address", "bad");
     if (next.mode === "exhausted") {
       return say(`no runs left this hour — ${minutesToReset()} min until they reset`, "bad");
@@ -118,7 +165,7 @@ export function Play() {
       // in hand and the level is a pure function of it — so a dead enclave
       // still lets the player play, and only blocks opening a new session.
       try {
-        const id = await identity(base);
+        const id = await api.identity();
         setEnclave(id);
         say(`enclave gameId ${id.gameId}, rulesHash ${id.rulesHash.slice(0, 14)}…`);
       } catch (e) {
@@ -134,7 +181,7 @@ export function Play() {
         return;
       }
 
-      const s = await openSession(base, player, next.k);
+      const s = await api.openSession(player, next.k);
       setSession({ epoch: s.epoch, k: s.k, seed: s.seed });
       setRecord({ player, epoch: s.epoch, k: s.k, seed: s.seed, spent: false });
       say(`session epoch ${s.epoch} k ${s.k} — seed ${s.seed}`, "ok");
@@ -147,12 +194,13 @@ export function Play() {
     } finally {
       setBusy(null);
     }
-  }, [verifier, player, next, setRecord, say, game]);
+  }, [verifier, simulating, sim, player, next, setRecord, say, game]);
 
   // -- attest + submit -----------------------------------------------------
 
   const finish = useCallback(async () => {
-    const base = verifier.trim();
+    const api = endpoint();
+    if (!api) return say(notReady(), "bad");
     if (!session || !game.result || !player || !enclave) return;
 
     // Local, not `busy`: the catch below needs to know which step threw, and
@@ -163,7 +211,7 @@ export function Play() {
     setFailed(null);
     try {
       say(`sending ${game.result.inputLog.length} log entries — no score is sent…`);
-      const att = await attest(base, player, session.epoch, session.k, game.result.inputLog);
+      const att = await api.attest(player, session.epoch, session.k, game.result.inputLog);
       setAttestation(att);
 
       const theirs = BigInt(att.claim.score);
@@ -173,6 +221,16 @@ export function Play() {
         say(`AGREES with this device (${ours}) — same wasm, same log, same answer`, "ok");
       } else {
         say(`DISAGREES: device ${ours}, enclave ${theirs}. The enclave's is authoritative.`, "bad");
+      }
+
+      // A simulated attestation is signed by a key printed in the source. The
+      // contract's verifier set does not contain it, so submitting would spend
+      // a transaction to be told what is already known — and, worse, would let
+      // the rail claim an on-chain step the simulator cannot honestly reach.
+      if (simulating) {
+        say("simulated enclave — stopping before submit. This signature is from a dev key", "info");
+        say("the contract does not trust; switch the simulator off to land a real score.", "info");
+        return;
       }
 
       if (!app) {
@@ -206,9 +264,84 @@ export function Play() {
     } finally {
       setBusy(null);
     }
-  }, [verifier, session, game.result, player, enclave, app, setRecord, say]);
+  }, [verifier, simulating, sim, session, game.result, player, enclave, app, setRecord, say]);
+
+  /**
+   * Switch between the deployed enclave and the one in this tab.
+   *
+   * The in-flight session is dropped rather than carried across. The seed the
+   * player holds was derived from a key only one of the two has, so attesting
+   * it against the other would replay a different level and produce a score
+   * that looks like a cheat rather than a mismatch of endpoints.
+   */
+  const toggleSimulation = useCallback(() => {
+    const on = !simulated;
+    setSimulated(on);
+    setSession(null);
+    setAttestation(null);
+    setEnclave(null);
+    setLanded(false);
+    setFailed(null);
+    say(
+      on
+        ? "simulating the enclave in this tab — seeds, replay and signature are local, and nothing is submitted"
+        : "back to the deployed enclave at the URL above",
+      "info",
+    );
+  }, [simulated, setSimulated, say]);
+
+  const connect = useCallback(() => {
+    connectWallet()
+      .then((m) =>
+        say(
+          m === "host"
+            ? "connected through the Polkadot host"
+            : "no host found — using dev accounts. Play and attestation work; on-chain submit needs the host.",
+          m === "host" ? "ok" : "info",
+        ),
+      )
+      .catch((e: unknown) => say(`wallet: ${e instanceof Error ? e.message : String(e)}`, "bad"));
+  }, [say]);
 
   const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+  // -- the controls on the screen ------------------------------------------
+  //
+  // Both actions live inside the stage, over the picture. The cabinet is what
+  // goes fullscreen, so a control anywhere else on the page is unreachable
+  // exactly when the game is most playable — a player would have to leave
+  // fullscreen to attest a run and then go back in to play the next one.
+  //
+  // Labels are derived here rather than inline: each button carries four or
+  // five states, and a nested ternary in the middle of the JSX hides which of
+  // them is actually reachable.
+
+  /** Nothing left to do with this run: it is attested, and either landed or unlandable. */
+  const attestSettled = attestation !== null && (landed || simulating || !app);
+
+  const attestLabel =
+    busy === "attest"
+      ? "Attesting…"
+      : busy === "submit"
+        ? "Submitting…"
+        : landed
+          ? "On the leaderboard"
+          : attestSettled
+            ? "Attested"
+            : simulating
+              ? "Attest (simulated)"
+              : "Attest & submit";
+
+  const playLabel =
+    busy === "session"
+      ? "Asking the enclave…"
+      : exhausted
+        ? `Back in ${minutesToReset()} min`
+        : canReplay
+          ? "Replay"
+          : game.result
+            ? "Play again"
+            : "Play";
 
   // -- fullscreen ----------------------------------------------------------
   //
@@ -291,19 +424,42 @@ export function Play() {
 
             {!game.ready && !game.error && <div className="overlay">loading sim.wasm…</div>}
             {game.error && <div className="overlay bad">{game.error}</div>}
+            {/* Before a run. The two overlays are mutually exclusive on
+                `session`, so toggling the simulator mid-result drops back to
+                this one rather than stacking both. */}
             {game.ready && !session && (
               <div className="overlay">
                 <h2>Ready</h2>
-                <p>
-                  Press <b>{canReplay ? "Replay" : "Play"}</b> — the enclave hands out the seed this level is built
-                  from.
-                </p>
+                {player ? (
+                  <>
+                    <p>The Acurast Processor hands out the seed. The seed is what the level is build of</p>
+                    <div className="overlay-actions">
+                      <button onClick={() => void play()} disabled={busy !== null || exhausted}>
+                        {playLabel}
+                      </button>
+                    </div>
+                    {exhausted && <p className="dim">That is every run for this hour.</p>}
+                  </>
+                ) : (
+                  <>
+                    <p>Your seed is derived from your address, so nobody can play your session for you.</p>
+                    <div className="overlay-actions">
+                      <button className="ghost" onClick={connect} disabled={connecting}>
+                        {connecting ? "Connecting…" : "Connect an account"}
+                      </button>
+                    </div>
+                  </>
+                )}
                 <p className="dim">
                   <kbd>←</kbd> <kbd>→</kbd> move · <kbd>space</kbd> jump — hold it, a tap is a shorter hop
                 </p>
               </div>
             )}
-            {game.result && (
+
+            {/* After one. The enclave's verdict is repeated here, not only in
+                the card below the cabinet, because in fullscreen there is no
+                below — and the whole point of the run is that number. */}
+            {game.result && session && (
               <div className="overlay">
                 <h2>
                   {game.result.won ? "Reached the goal" : game.result.lives === 0 ? "Out of lives" : "Time up"}
@@ -311,7 +467,27 @@ export function Play() {
                 <p>
                   this device scored <b>{String(game.result.score)}</b> over {game.result.ticks} ticks
                 </p>
-                <p className="dim">{game.result.inputLog.length} log entries — now let the enclave recompute it</p>
+
+                {attestation ? (
+                  <p className={BigInt(attestation.claim.score) === game.result.score ? "ok" : "bad"}>
+                    the enclave replayed {attestation.ticks} ticks and computed <b>{attestation.claim.score}</b> —{" "}
+                    {BigInt(attestation.claim.score) === game.result.score
+                      ? "it agrees"
+                      : "it disagrees, and its number is the one that counts"}
+                  </p>
+                ) : (
+                  <p className="dim">{game.result.inputLog.length} log entries — now let the enclave recompute it</p>
+                )}
+
+                <div className="overlay-actions">
+                  <button onClick={() => void finish()} disabled={busy !== null || attestSettled}>
+                    {attestLabel}
+                  </button>
+                  <button className="ghost" onClick={() => void play()} disabled={busy !== null || exhausted}>
+                    {playLabel}
+                  </button>
+                </div>
+                {exhausted && <p className="dim">That is every run for this hour.</p>}
               </div>
             )}
 
@@ -336,7 +512,9 @@ export function Play() {
           <section className="panel">
             <div className="panel-head">
               <h2>Session</h2>
-              <span className="note">{app ? "polkadot host connected" : "standalone — no host"}</span>
+              <span className="note">
+                {simulating ? "simulated enclave" : app ? "polkadot host connected" : "standalone — no host"}
+              </span>
             </div>
             <div className="panel-body">
               <div className="field-row">
@@ -349,23 +527,7 @@ export function Play() {
                       <span>{player ? short(player) : "—"}</span>
                     </span>
                   ) : (
-                    <button
-                      id="account"
-                      className="ghost"
-                      onClick={() => {
-                        connectWallet()
-                          .then((m) =>
-                            say(
-                              m === "host"
-                                ? "connected through the Polkadot host"
-                                : "no host found — using dev accounts. Play and attestation work; on-chain submit needs the host.",
-                              m === "host" ? "ok" : "info",
-                            ),
-                          )
-                          .catch((e: unknown) => say(`wallet: ${e instanceof Error ? e.message : String(e)}`, "bad"));
-                      }}
-                      disabled={connecting}
-                    >
+                    <button id="account" className="ghost" onClick={connect} disabled={connecting}>
                       {connecting ? "Connecting…" : "Connect wallet"}
                     </button>
                   )}
@@ -379,31 +541,42 @@ export function Play() {
                     id="verifier"
                     value={verifier}
                     spellCheck={false}
+                    disabled={simulating}
                     placeholder="https://<tunnel>.trycloudflare.com"
                     onChange={(e) => setVerifier(e.target.value)}
                   />
+                  {simulating && <span className="hint">unused while the simulator is on</span>}
                 </div>
               </div>
 
-              {/* No attempt number anywhere here. Which slot the protocol is
-                  spending is bookkeeping the player has no decision to make
-                  about — it only ever surfaces as "you are out of runs for
-                  now", and in the technical log. */}
-              <div className="field-row actions">
-                <button onClick={() => void play()} disabled={busy !== null || !game.ready || exhausted}>
-                  {busy === "session"
-                    ? "Asking the enclave…"
-                    : exhausted
-                      ? `Back in ${minutesToReset()} min`
-                      : canReplay
-                        ? "Replay"
-                        : "Play"}
-                </button>
-                <button className="ghost" onClick={() => void finish()} disabled={busy !== null || !game.result || !session}>
-                  {busy === "attest" ? "Attesting…" : busy === "submit" ? "Submitting…" : "Attest & submit"}
-                </button>
-                {exhausted && <span className="hint">That is every run for this hour.</span>}
-              </div>
+              {/* Development only. This whole block is compiled away in a
+                  build, along with the simulator it switches on. */}
+              {import.meta.env.DEV && (
+                <div className="field-row">
+                  <div className="field grow">
+                    <span className="label">Development</span>
+                    <div className="dev-row">
+                      <button className="ghost" onClick={toggleSimulation} aria-pressed={simulated}>
+                        {simulated ? "Simulator: on" : "Simulate the enclave"}
+                      </button>
+                      <span className="hint">
+                        {simulated
+                          ? "Seeds, replay and the EIP-712 signature are computed here, by a key that is in the source. Play and attest work with nothing deployed; submitting is refused."
+                          : "Runs the verifier in this tab so play and attest work without an Acurast job or a tunnel."}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Play and Attest are not repeated here. They live on the
+                  screen, where they stay reachable in fullscreen; a second
+                  copy would be both redundant and a competing call to action.
+
+                  No attempt number appears anywhere either. Which slot the
+                  protocol is spending is bookkeeping the player has no decision
+                  to make about — it only ever surfaces as "you are out of runs
+                  for now", and in the technical log. */}
             </div>
           </section>
 

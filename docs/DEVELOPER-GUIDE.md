@@ -587,6 +587,33 @@ mounts the provider only when there is a host, with an error boundary behind it.
 Without a host the app still plays and still gets scores attested; only the on-chain submit
 is unavailable. A `DevProvider` fallback supplies dev accounts so `npm run dev` is useful.
 
+### Working without an enclave
+
+An Acurast job is a *onetime* execution behind a quick tunnel, so the verifier URL baked into
+`Play.tsx` is stale the moment the job ends — and redeploying to change one line of UI is a
+poor loop. `npm run dev` therefore offers **Simulate the enclave**, a switch in the Session
+panel that replaces the deployed verifier with `app/src/chain/mock.ts`, running in the tab.
+
+It is a second implementation of `verifier.mjs`, deliberately faithful: the same
+`sessionIdFor`, the same `keccak256(sign("rainbow-seed-v1" ‖ sessionId))` seed derivation, a
+replay through `sim_verify` on its **own** wasm instance — not the one the player just
+played on — and the same EIP-712 digest. `rulesHash` is hashed from the bytes it actually
+loaded. Steps 1–5 of the proof rail work end to end with nothing deployed.
+
+What it is not is a verifier. Its key is derived from a string in the source, so anyone can
+sign anything with it; the contract's `isVerifier` set does not contain it. Two guards keep
+that from becoming confusing rather than obvious:
+
+- **It never submits.** `finish()` stops after attesting and says why. Step 6 stays idle,
+  because the simulator cannot honestly reach it.
+- **Sessions do not cross over.** Simulated runs are held under `rainbow.session.sim`,
+  separate from `rainbow.session`. The two enclaves derive different seeds for the same
+  `(player, epoch, k)`, so replaying one's held seed against the other would produce a score
+  mismatch that looks exactly like a cheat.
+
+The switch and the module behind it are gated on `import.meta.env.DEV` and reached through a
+dynamic `import()`, so a build drops both — which matters, given the byte quota below.
+
 ### Publishing
 
 ```bash
