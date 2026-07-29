@@ -44,5 +44,3 @@ secure element, accepted by a PolkaVM contract on Asset Hub.
 | [E0.1 product sandbox](docs/E0.1-product-sandbox.md) | what a Product may do |
 | [E0.3 / E0.4 Acurast](docs/E0.3-E0.4-acurast.md) | `signer_sign` semantics, tunnel |
 | [Goal.md](Goal.md) | the original design |
-
-<div align="center">
