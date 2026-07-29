@@ -17,7 +17,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": false,
+    // Node's type stripping resolves the specifier verbatim, so a test
+    // importing the module under test must write `./attempts.ts`. Permitted
+    // only because nothing here is emitted — Vite does its own resolution.
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": ["src"]

@@ -13,6 +13,9 @@ interface Props {
  * Fed from a snapshot sampled ~10× a second rather than every frame: the
  * simulation runs at 60Hz and re-rendering React that often would burn budget
  * the game loop needs, for numbers no one can read that fast.
+ *
+ * Rendered on the cabinet's chin rather than as a page panel — these numbers
+ * belong to the screen above them, and the seed is the screen's provenance.
  */
 export function Hud({ hud, result, seed }: Props) {
   const score = result ? result.score : (hud?.score ?? 0n);
@@ -21,7 +24,7 @@ export function Hud({ hud, result, seed }: Props) {
   const tick = result ? result.ticks : (hud?.tick ?? 0);
 
   return (
-    <section className="panel hud">
+    <section className="hud">
       <span>
         <b>score</b> {String(score)}
       </span>
