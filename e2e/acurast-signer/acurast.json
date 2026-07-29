@@ -33,8 +33,16 @@
       "maxAllowedStartDelayInMs": 60000,
       "restartPolicy": "no",
       "mutability": "Mutable",
-      "reuseKeysFrom": null,
-      "maxCostPerExecution": 200000000000,
+
+      "minProcessorReputation": 0,
+
+      "usageLimit": {
+        "maxMemory": 1000000000,
+        "maxNetworkRequests": 10000,
+        "maxStorage": 4000000000
+      },
+
+      "maxCostPerExecution": 80000000000,
       "onlyAttestedDevices": false,
       "enableDevtools": true,
       "includeEnvironmentVariables": [

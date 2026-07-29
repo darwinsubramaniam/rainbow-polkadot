@@ -208,13 +208,28 @@ if (sigs.digest32?.signature && sigs.digest32_again?.signature) {
   console.log(`nonce generation : ${same ? "deterministic (RFC 6979)" : "randomised k"}\n`);
 }
 
+// The 5-byte probe. Be careful with this one: "it signed a non-32-byte input"
+// does NOT by itself prove the runtime hashes, because it may equally have
+// padded or truncated to 32 bytes. Only a hypothesis match is real evidence.
 const short = sigs.short5;
 if (short) {
-  console.log(
-    short.signature
-      ? "5-byte input SIGNED — the runtime hashes its input rather than requiring a 32-byte digest"
-      : "5-byte input REJECTED — consistent with the runtime expecting a pre-computed digest",
-  );
+  if (!short.signature) {
+    console.log("5-byte input REJECTED — consistent with expecting a pre-computed 32-byte digest");
+  } else {
+    const shortInput = hexToBytes(strip(short.input));
+    const hashingMatch = HYPOTHESES.filter((h) => h.id !== "raw32").find(
+      (h) => recovers(short.signature, h.apply(shortInput), address),
+    );
+    if (hashingMatch) {
+      console.log(`5-byte input signed via ${hashingMatch.id} — the runtime hashes its input`);
+    } else {
+      console.log(
+        "5-byte input signed, but under no tested hypothesis — the runtime likely\n" +
+          "pads or truncates short inputs to 32 bytes. Inconclusive on its own;\n" +
+          "trust the 32-byte result above.",
+      );
+    }
+  }
   console.log();
 }
 
