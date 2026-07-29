@@ -23,3 +23,7 @@ contracts/lib/
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+
+# papi generated descriptors + metadata (regenerate: npx papi add ah -w <rpc> && npx papi generate)
+scripts/.papi/
+contracts/target/

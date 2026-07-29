@@ -14,6 +14,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 ///
 /// @dev Ranking is deliberately NOT maintained on-chain. Insertion into a sorted array
 ///      is unbounded gas; clients rank off-chain from {NewBest} events instead.
+///
+/// @custom:cdm @dw3labs/rainbow-leaderboard
 contract Leaderboard is EIP712, Ownable {
     // -----------------------------------------------------------------------
     // Types
@@ -39,18 +41,28 @@ contract Leaderboard is EIP712, Ownable {
     );
 
     // -----------------------------------------------------------------------
-    // Immutables
+    // Rules constants
     // -----------------------------------------------------------------------
+    //
+    // These are compile-time constants rather than constructor arguments, for two
+    // reasons. Practically, `cdm deploy` passes no constructor arguments, so anything
+    // configurable that way cannot be deployed through it. Conceptually they are part
+    // of the *rules* — changing the grind cap changes what a score means — so pinning
+    // them to the deployment, exactly as `rulesHash` pins the simulation, is the
+    // consistent choice. To change them, deploy a new contract.
 
     /// @notice Length of a session epoch, in seconds.
     /// @dev Anti-grinding (defect D1). The enclave derives a run's seed from
     ///      (player, epoch, k) with a secret root key, and only issues seeds for the
     ///      current epoch. A player therefore gets at most {maxSessionsPerEpoch} seeds
     ///      per epoch instead of unlimited re-rolls, and cannot compute seeds offline.
-    uint64 public immutable epochSeconds;
+    uint64 public constant epochSeconds = 1 hours;
 
     /// @notice How many session slots a player gets per epoch. The grinding cap.
-    uint32 public immutable maxSessionsPerEpoch;
+    /// @dev Generous against honest play — a run is capped at 36,000 ticks (10 minutes),
+    ///      so twelve slots exceeds what an hour physically allows — while still
+    ///      bounding how many seeds an attacker can sample and discard.
+    uint32 public constant maxSessionsPerEpoch = 12;
 
     // -----------------------------------------------------------------------
     // Storage
@@ -105,25 +117,20 @@ contract Leaderboard is EIP712, Ownable {
     error SessionIndexOutOfRange();
     error GameAlreadyRegistered();
     error ZeroRulesHash();
-    error InvalidConfiguration();
 
     // -----------------------------------------------------------------------
     // Construction
     // -----------------------------------------------------------------------
 
-    constructor(address initialVerifier, uint64 epochSeconds_, uint32 maxSessionsPerEpoch_)
-        EIP712("RainbowLeaderboard", "1")
-        Ownable(msg.sender)
-    {
-        if (epochSeconds_ == 0 || maxSessionsPerEpoch_ == 0) revert InvalidConfiguration();
-        epochSeconds = epochSeconds_;
-        maxSessionsPerEpoch = maxSessionsPerEpoch_;
-
-        if (initialVerifier != address(0)) {
-            isVerifier[initialVerifier] = true;
-            emit VerifierSet(initialVerifier, true);
-        }
-    }
+    /// @dev Takes no arguments, because `cdm deploy` supplies none. The deployer
+    ///      becomes owner and must then call {setVerifier} and {registerGame} before
+    ///      any submission can succeed.
+    ///
+    ///      There is no uninitialised-window risk: with no game registered every
+    ///      {submit} reverts `UnknownGame`, and with no verifier registered every
+    ///      attestation reverts `BadAttestation`. The contract fails closed until the
+    ///      owner opens it, so front-running setup is not possible.
+    constructor() EIP712("RainbowLeaderboard", "1") Ownable(msg.sender) {}
 
     // -----------------------------------------------------------------------
     // Views

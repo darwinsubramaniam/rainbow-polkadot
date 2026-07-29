@@ -1,0 +1,13 @@
+{
+  "name": "rainbow-chain-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Devnet ops: call PolkaVM contracts as the mapped Substrate account, which cast cannot do.",
+  "dependencies": {
+    "@polkadot-api/descriptors": "file:.papi/descriptors",
+    "@polkadot-labs/hdkd": "^0.0.29",
+    "@polkadot-labs/hdkd-helpers": "^0.0.31",
+    "@polkadot/api": "^16.4.8",
+    "polkadot-api": "^2.2.1"
+  }
+}

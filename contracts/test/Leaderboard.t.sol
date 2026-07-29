@@ -20,8 +20,8 @@ contract LeaderboardTest is Test {
     address internal relayer = address(0x2E1A);
 
     uint64 internal constant GAME = 1;
-    uint64 internal constant EPOCH_SECS = 1 hours;
-    uint32 internal constant MAX_K = 4;
+    uint64 internal EPOCH_SECS;
+    uint32 internal MAX_K;
     bytes32 internal constant RULES = keccak256("sim-v1");
 
     /// secp256k1 group order, for constructing a malleable signature.
@@ -32,8 +32,13 @@ contract LeaderboardTest is Test {
         verifier = vm.addr(verifierKey);
         rogue = vm.addr(rogueKey);
 
-        board = new Leaderboard(verifier, EPOCH_SECS, MAX_K);
+        board = new Leaderboard();
+        board.setVerifier(verifier, true);
         board.registerGame(GAME, RULES);
+
+        // Read the pinned rules back rather than duplicating them in the test.
+        EPOCH_SECS = board.epochSeconds();
+        MAX_K = board.maxSessionsPerEpoch();
 
         // Start well past epoch 0 so "epoch in the past" is expressible.
         vm.warp(100 days);
@@ -344,11 +349,24 @@ contract LeaderboardTest is Test {
     // Construction & digest shape
     // -----------------------------------------------------------------------
 
-    function test_constructorRejectsDegenerateConfiguration() public {
-        vm.expectRevert(Leaderboard.InvalidConfiguration.selector);
-        new Leaderboard(verifier, 0, MAX_K);
-        vm.expectRevert(Leaderboard.InvalidConfiguration.selector);
-        new Leaderboard(verifier, EPOCH_SECS, 0);
+    function test_freshDeploymentFailsClosed() public {
+        // `cdm deploy` passes no constructor arguments, so a new board starts with no
+        // verifier and no games. It must reject everything until the owner opens it —
+        // otherwise the setup window would be front-runnable.
+        Leaderboard fresh = new Leaderboard();
+        assertEq(fresh.owner(), address(this));
+        assertTrue(fresh.epochSeconds() > 0);
+        assertTrue(fresh.maxSessionsPerEpoch() > 0);
+
+        Leaderboard.ScoreClaim memory c = _claim(alice, 1, fresh.currentEpoch(), 0);
+        bytes memory sig = _sign(verifierKey, c);
+        vm.expectRevert(Leaderboard.UnknownGame.selector);
+        fresh.submit(c, sig);
+
+        // With a game registered but still no verifier, it fails on the signature.
+        fresh.registerGame(GAME, RULES);
+        vm.expectRevert(Leaderboard.BadAttestation.selector);
+        fresh.submit(c, sig);
     }
 
     function test_digestMatchesEip712ComputedIndependently() public view {
@@ -381,7 +399,8 @@ contract LeaderboardTest is Test {
     function test_digestIsBoundToThisContractAndChain() public {
         // The EIP-712 domain supplies chainId and verifyingContract, which is what
         // stops an attestation being replayed on another chain or a redeploy.
-        Leaderboard other = new Leaderboard(verifier, EPOCH_SECS, MAX_K);
+        Leaderboard other = new Leaderboard();
+        other.setVerifier(verifier, true);
         other.registerGame(GAME, RULES);
         Leaderboard.ScoreClaim memory c = _claim(alice, 100, board.currentEpoch(), 0);
 
