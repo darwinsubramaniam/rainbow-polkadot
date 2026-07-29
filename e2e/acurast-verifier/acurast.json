@@ -1,0 +1,61 @@
+{
+  "projects": {
+    "rainbow-verifier": {
+      "projectName": "rainbow-verifier",
+      "fileUrl": "app",
+      "entrypoint": "start.sh",
+      "runtime": "Shell",
+      "image": {
+        "url": "https://github.com/termux/proot-distro/releases/download/v4.30.1/ubuntu-questing-aarch64-pd-v4.30.1.tar.xz",
+        "sha256": "5ab35b90cd9a9f180656261ba400a135c4c01c2da4b74522118342f985c2d328"
+      },
+      "network": "canary",
+      "requiredModules": ["Shell"],
+
+      "minProcessorVersions": {
+        "android": "1.26.0"
+      },
+
+      "assignmentStrategy": {
+        "type": "Single",
+        "instantMatch": [
+          {
+            "processor": "5CHmRH4ceUVcjqNG3vkkDLk3NoLfkKMdyyqLKVVMzRbR5rdq",
+            "maxAllowedStartDelayInMs": 10000
+          }
+        ]
+      },
+      "numberOfReplicas": 1,
+      "processorWhitelist": ["5CHmRH4ceUVcjqNG3vkkDLk3NoLfkKMdyyqLKVVMzRbR5rdq"],
+
+      "execution": {
+        "type": "onetime",
+        "maxExecutionTimeInMs": 3600000
+      },
+      "maxAllowedStartDelayInMs": 60000,
+      "restartPolicy": "no",
+
+      "mutability": "Mutable",
+      "minProcessorReputation": 0,
+
+      "usageLimit": {
+        "maxMemory": 2000,
+        "maxNetworkRequests": 10,
+        "maxStorage": 10000
+      },
+
+      "maxCostPerExecution": 160000000000,
+      "onlyAttestedDevices": false,
+      "enableDevtools": true,
+
+      "includeEnvironmentVariables": [
+        "WEBHOOK_URL",
+        "CONTRACT",
+        "CHAIN_ID",
+        "GAME_ID",
+        "EPOCH_SECONDS",
+        "MAX_SESSIONS_PER_EPOCH"
+      ]
+    }
+  }
+}

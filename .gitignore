@@ -1,0 +1,45 @@
+/target
+
+# Acurast CLI scratch (logs + staged deploy bundles)
+.acurast/
+
+# Secrets — never commit. See e2e/acurast-signer/.env.example
+.env
+**/.env
+
+node_modules/
+
+# Python bytecode — the Acurast bundler zips fileUrl verbatim, no ignore support
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Foundry — libs are vendored by `forge install` (902 files / 14MB); pinned
+# versions live in contracts/README.md so builds stay reproducible without
+# committing them.
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# papi generated descriptors + metadata (regenerate: npx papi add ah -w <rpc> && npx papi generate)
+scripts/.papi/
+contracts/target/
+
+# --- Product app (app/) ------------------------------------------------------
+
+# Vite build output, and the CAR archive `pad` stages next to it for upload.
+# Regenerate with `npm run build`; the deployed CID is recorded in
+# docs/DEVELOPER-GUIDE.md rather than by committing the bundle.
+app/dist/
+app/dist.car
+
+# Copied from cargo's output by `npm run sync-wasm` on every dev/build. Checking
+# it in would create a second copy of the rules artifact that could silently
+# drift from the one the enclave runs and the contract is pinned to.
+app/public/sim.wasm
+
+# tsc -b incremental state
+*.tsbuildinfo

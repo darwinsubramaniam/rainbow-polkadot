@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rainbow — Product sandbox probe (E0.1)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin: 0; padding: 16px; max-width: 46rem;
+  }
+  h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 1.25rem; opacity: .7; }
+  .row {
+    display: flex; gap: .6rem; align-items: baseline;
+    padding: .55rem 0; border-bottom: 1px solid rgba(128,128,128,.25);
+  }
+  .tag {
+    flex: none; width: 4.2rem; text-align: center; border-radius: 4px;
+    padding: .1rem .3rem; font-weight: 700; font-size: .78rem;
+  }
+  .pass { background: #0a7d33; color: #fff; }
+  .fail { background: #b3261e; color: #fff; }
+  .warn { background: #8a6100; color: #fff; }
+  .pend { background: #555; color: #fff; }
+  .name { flex: none; width: 12rem; }
+  .detail { flex: 1; opacity: .8; word-break: break-word; }
+  .verdict { margin-top: 1.5rem; padding: .9rem; border-radius: 6px; font-weight: 700; }
+  .verdict.go { background: rgba(10,125,51,.15); border: 1px solid #0a7d33; }
+  .verdict.nogo { background: rgba(179,38,30,.15); border: 1px solid #b3261e; }
+  code { background: rgba(128,128,128,.18); padding: 0 .25rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>Rainbow — Product sandbox probe</h1>
+<p class="sub">Experiment E0.1. Decides whether the push/tunnel architecture is viable
+inside a Polkadot Product, before anything expensive gets built on it.</p>
+
+<div id="results"></div>
+<div id="verdict"></div>
+
+<script>
+// Each check is independent and reports its own verdict. `critical: true` means
+// a failure invalidates the planned architecture rather than merely being
+// inconvenient.
+const CHECKS = [
+  {
+    name: "Host container",
+    critical: false,
+    note: "Product is running inside the Polkadot app / dev-dot.li host",
+    run: async () => {
+      const injected = typeof window !== "undefined" && window.injectedWeb3;
+      const spektr = injected && window.injectedWeb3.spektr;
+      if (spektr) return { ok: true, detail: "injectedWeb3.spektr present" };
+      if (injected) {
+        return { ok: false, level: "warn",
+          detail: "injectedWeb3 present but no spektr — opened outside the host?" };
+      }
+      return { ok: false, level: "warn",
+        detail: "no injectedWeb3 — this page is not inside a host container" };
+    },
+  },
+  {
+    name: "Frame context",
+    critical: false,
+    note: "Sandboxed iframe vs top-level browsing context",
+    run: async () => {
+      const framed = window.self !== window.top;
+      let originAccessible = true;
+      try { void window.top.location.href; } catch { originAccessible = false; }
+      return {
+        ok: true,
+        detail: framed
+          ? `iframed; cross-origin=${!originAccessible}; origin=${location.origin}`
+          : `top-level; origin=${location.origin}`,
+      };
+    },
+  },
+  {
+    name: "WebAssembly",
+    critical: true,
+    note: "sim.wasm must instantiate — a CSP without 'wasm-unsafe-eval' blocks this",
+    run: async () => {
+      if (typeof WebAssembly === "undefined") {
+        return { ok: false, detail: "WebAssembly is undefined" };
+      }
+      // Smallest valid module that exports a function returning 42.
+      const bytes = new Uint8Array([
+        0x00,0x61,0x73,0x6d, 0x01,0x00,0x00,0x00,
+        0x01,0x05,0x01,0x60,0x00,0x01,0x7f,
+        0x03,0x02,0x01,0x00,
+        0x07,0x05,0x01,0x01,0x66,0x00,0x00,
+        0x0a,0x06,0x01,0x04,0x00,0x41,0x2a,0x0b,
+      ]);
+      try {
+        const { instance } = await WebAssembly.instantiate(bytes, {});
+        const v = instance.exports.f();
+        return v === 42
+          ? { ok: true, detail: "instantiate + call succeeded" }
+          : { ok: false, detail: `instantiated but returned ${v}, expected 42` };
+      } catch (e) {
+        return { ok: false, detail: `${e.name}: ${e.message}` };
+      }
+    },
+  },
+  {
+    name: "Third-party fetch",
+    critical: true,
+    note: "THE decider — the client must reach the Acurast verifier over a tunnel",
+    run: async () => {
+      // Two independent origins, so one host being down is not read as a
+      // policy block. Either succeeding proves egress is permitted.
+      const targets = [
+        "https://cloudflare-dns.com/dns-query?name=example.com&type=A",
+        "https://api.github.com/meta",
+      ];
+      const errors = [];
+      for (const url of targets) {
+        try {
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), 8000);
+          const r = await fetch(url, {
+            signal: ctl.signal,
+            headers: { accept: "application/json" },
+          });
+          clearTimeout(timer);
+          return { ok: true, detail: `${new URL(url).host} → HTTP ${r.status}` };
+        } catch (e) {
+          errors.push(`${new URL(url).host}: ${e.name} ${e.message}`);
+        }
+      }
+      return { ok: false, detail: errors.join(" | ") };
+    },
+  },
+  {
+    name: "WebGL2",
+    critical: false,
+    note: "PixiJS renderer target; Canvas2D is the fallback if absent",
+    run: async () => {
+      const c = document.createElement("canvas");
+      const gl = c.getContext("webgl2");
+      if (!gl) {
+        const gl1 = c.getContext("webgl");
+        return gl1
+          ? { ok: false, level: "warn", detail: "WebGL1 only — Pixi will fall back" }
+          : { ok: false, level: "warn", detail: "no WebGL at all — use Canvas2D" };
+      }
+      const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+      const who = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "renderer masked";
+      return { ok: true, detail: String(who).slice(0, 90) };
+    },
+  },
+  {
+    name: "SharedArrayBuffer",
+    critical: false,
+    note: "Expected ABSENT — confirms why Godot/Bevy web builds are ruled out",
+    run: async () => {
+      const has = typeof SharedArrayBuffer !== "undefined";
+      const isolated = typeof crossOriginIsolated !== "undefined" ? crossOriginIsolated : "n/a";
+      return has && isolated === true
+        ? { ok: true, level: "warn",
+            detail: `available (crossOriginIsolated=${isolated}) — threaded engines would work` }
+        : { ok: true,
+            detail: `unavailable (crossOriginIsolated=${isolated}) — as predicted` };
+    },
+  },
+  {
+    name: "Persistent storage",
+    critical: false,
+    note: "For stashing an unsubmitted run across a reload",
+    run: async () => {
+      try {
+        localStorage.setItem("__rainbow_probe", "1");
+        localStorage.removeItem("__rainbow_probe");
+        return { ok: true, detail: "localStorage writable" };
+      } catch (e) {
+        return { ok: false, level: "warn", detail: `${e.name}: ${e.message}` };
+      }
+    },
+  },
+  {
+    name: "High-res timer",
+    critical: false,
+    note: "Drives the fixed-step accumulator (never fed into the sim)",
+    run: async () => {
+      const a = performance.now();
+      let spin = 0;
+      for (let i = 0; i < 200000; i++) spin += i;
+      const d = performance.now() - a;
+      return { ok: d > 0, detail: `performance.now() resolved ${d.toFixed(3)}ms (spin=${spin})` };
+    },
+  },
+];
+
+const results = document.getElementById("results");
+
+function render(check, state, detail) {
+  let row = document.getElementById("row-" + check.name);
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "row";
+    row.id = "row-" + check.name;
+    row.innerHTML =
+      `<span class="tag pend">…</span><span class="name"></span><span class="detail"></span>`;
+    results.appendChild(row);
+  }
+  const tag = row.querySelector(".tag");
+  tag.className = "tag " + state;
+  tag.textContent = state === "pass" ? "PASS" : state === "fail" ? "FAIL"
+                  : state === "warn" ? "WARN" : "…";
+  row.querySelector(".name").textContent = check.name;
+  row.querySelector(".detail").textContent = detail;
+}
+
+(async () => {
+  const summary = [];
+  for (const check of CHECKS) {
+    render(check, "pend", check.note);
+    let r;
+    try {
+      r = await check.run();
+    } catch (e) {
+      r = { ok: false, detail: `probe threw: ${e.name}: ${e.message}` };
+    }
+    const state = r.ok ? (r.level === "warn" ? "warn" : "pass") : (r.level || "fail");
+    render(check, state, r.detail);
+    summary.push({ name: check.name, critical: check.critical, state, detail: r.detail });
+  }
+
+  const blockers = summary.filter((s) => s.critical && s.state === "fail");
+  const v = document.getElementById("verdict");
+  if (blockers.length === 0) {
+    v.className = "verdict go";
+    v.textContent =
+      "GO — every critical check passed. The push/tunnel architecture is viable inside a Product.";
+  } else {
+    v.className = "verdict nogo";
+    v.textContent =
+      "NO-GO — critical failure(s): " + blockers.map((b) => b.name).join(", ") +
+      ". Pivot to the pull/oracle transport (client publishes the input log, " +
+      "the enclave watches on-chain and submits the score itself).";
+  }
+
+  // Machine-readable copy, so the result can be pasted back rather than
+  // transcribed from a phone screen.
+  const blob = { userAgent: navigator.userAgent, href: location.href, summary };
+  const pre = document.createElement("pre");
+  pre.style.cssText = "margin-top:1rem;font-size:11px;opacity:.65;white-space:pre-wrap";
+  pre.textContent = JSON.stringify(blob, null, 2);
+  document.body.appendChild(pre);
+  console.log("[rainbow-probe]", blob);
+})();
+</script>
+</body>
+</html>

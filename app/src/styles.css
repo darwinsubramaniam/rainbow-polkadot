@@ -1,0 +1,966 @@
+/**
+ * Rainbow — design system.
+ *
+ * The palette and type are lifted from dw3labs.com: a light, precise
+ * engineering surface — white ground, deep navy ink, one blue primary with a
+ * cyan second voice, hairline borders, small radii.
+ *
+ * One place inverts: the play surface. The game has its own world with its own
+ * palette (renderer.ts), so the stage is a dark cabinet inset into a light
+ * page rather than a themed panel. Everything that reports a *fact* — scores,
+ * hashes, addresses, the proof trace — is set in mono, because that is what
+ * the content is.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ground */
+  --bg: #ffffff;
+  --surface: #f7fafc;
+  --surface-2: #eff4f9;
+
+  /* ink */
+  --ink: #020e42;
+  --ink-soft: #496079;
+  --ink-faint: #7d90a6;
+
+  /* line */
+  --line: #d9e2ec;
+  --line-soft: #e9eff5;
+
+  /* voice */
+  --primary: #005fc8;
+  --primary-deep: #00429b;
+  --primary-wash: #e8f0fc;
+  --cyan: #0082a2;
+  --cyan-wash: #e2f4f8;
+
+  /* verdicts */
+  --ok: #0a7d4a;
+  --ok-wash: #e4f6ec;
+  --bad: #c8102e;
+  --bad-wash: #fdecee;
+
+  /* the game's own world */
+  --screen: #0d1119;
+  --screen-line: #1e2636;
+  --screen-ink: #c9d4e6;
+  --screen-dim: #71809a;
+
+  --radius: 10px;
+  --radius-lg: 16px;
+  --shadow: 0 1px 2px rgb(2 14 66 / 0.04), 0 8px 24px -12px rgb(2 14 66 / 0.14);
+  --shadow-lift: 0 1px 2px rgb(2 14 66 / 0.05), 0 18px 40px -18px rgb(2 14 66 / 0.28);
+
+  --display: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+html, body { margin: 0; background: var(--bg); }
+
+body {
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  /* The play surface uses press-and-hold; browser touch gestures would fight it. */
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Text is selectable everywhere except the play surface — hashes and addresses
+   exist to be copied. */
+.stage, .touchpad, .hud { -webkit-user-select: none; user-select: none; }
+
+h1, h2, h3, h4 {
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.022em;
+  line-height: 1.12;
+  margin: 0;
+  text-wrap: balance;
+}
+
+p { margin: 0; text-wrap: pretty; }
+
+a { color: var(--primary); text-decoration: none; }
+a:hover { color: var(--primary-deep); text-decoration: underline; text-underline-offset: 3px; }
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+code, kbd, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+kbd {
+  font-size: .78em;
+  padding: .12em .42em;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--ink-soft);
+}
+
+.boot {
+  font-family: var(--mono);
+  font-size: .85rem;
+  color: var(--ink-faint);
+  padding: 4rem var(--gutter);
+}
+
+/* -- layout primitives ---------------------------------------------------- */
+
+.shell { display: flex; flex-direction: column; min-height: 100vh; }
+main { flex: 1; }
+
+.container {
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+.container.narrow { max-width: 780px; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .72rem;
+  font-weight: 500;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin: 0 0 .9rem;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+}
+.eyebrow::before {
+  content: "";
+  width: 1.6rem;
+  height: 1px;
+  background: currentColor;
+  flex: none;
+}
+
+.lede { color: var(--ink-soft); font-size: 1.05rem; }
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+.skip:focus {
+  left: var(--gutter);
+  top: .6rem;
+  z-index: 20;
+  background: var(--bg);
+  padding: .5rem .8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* -- header --------------------------------------------------------------- */
+
+.site-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgb(255 255 255 / 0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line-soft);
+}
+.site-head .container {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: 60px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: .6rem;
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin-right: auto;
+}
+.brand:hover { text-decoration: none; color: var(--ink); }
+.brand .mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: linear-gradient(140deg, var(--cyan), var(--primary) 55%, #4b2fd6);
+  box-shadow: inset 0 0 0 1px rgb(2 14 66 / 0.12);
+  flex: none;
+}
+
+.site-nav { display: flex; align-items: center; gap: .15rem; }
+.site-nav a {
+  font-size: .9rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  padding: .4rem .7rem;
+  border-radius: 7px;
+}
+.site-nav a:hover { background: var(--surface-2); color: var(--ink); text-decoration: none; }
+.site-nav a[aria-current="page"] { color: var(--primary); background: var(--primary-wash); }
+.site-nav a.icon { display: inline-flex; padding: .45rem .55rem; color: var(--ink-faint); }
+.site-nav a.icon:hover { color: var(--ink); }
+.site-nav a.icon svg { width: 18px; height: 18px; display: block; }
+
+/* -- buttons -------------------------------------------------------------- */
+
+button, .btn {
+  font-family: var(--sans);
+  font-size: .9rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: .55rem 1.05rem;
+  cursor: pointer;
+  background: var(--primary);
+  color: #fff;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+button:hover:not(:disabled), .btn:hover { background: var(--primary-deep); text-decoration: none; color: #fff; }
+
+button.ghost, .btn.ghost {
+  background: var(--bg);
+  color: var(--ink);
+  border-color: var(--line);
+}
+button.ghost:hover:not(:disabled), .btn.ghost:hover {
+  background: var(--surface-2);
+  border-color: #c6d3e1;
+  color: var(--ink);
+}
+
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn { display: inline-flex; align-items: center; gap: .45rem; }
+
+/* -- panels --------------------------------------------------------------- */
+
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  padding: .85rem 1.1rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+.panel-head h2, .panel-head h3 { font-size: .95rem; font-weight: 700; letter-spacing: -0.01em; }
+.panel-head .note { font-family: var(--mono); font-size: .74rem; color: var(--ink-faint); margin-left: auto; }
+.panel-body { padding: 1.1rem; }
+
+/* -- hero ----------------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  padding: clamp(2.5rem, 6vw, 4.5rem) 0 1.75rem;
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -40% 0 auto;
+  height: 460px;
+  background:
+    radial-gradient(60% 100% at 22% 0%, rgb(0 130 162 / 0.10), transparent 70%),
+    radial-gradient(55% 100% at 78% 10%, rgb(0 95 200 / 0.12), transparent 72%);
+  pointer-events: none;
+}
+.hero > .container { position: relative; }
+
+.hero h1 {
+  font-size: clamp(2.1rem, 5.4vw, 3.5rem);
+  max-width: 17ch;
+}
+.hero h1 em { font-style: normal; color: var(--primary); }
+.hero .lede { margin-top: 1.1rem; max-width: 58ch; }
+
+/* -- the play grid -------------------------------------------------------- */
+
+/* No hero above it any more — the game is the first thing on the page. */
+.play { padding: 1.75rem 0 4rem; }
+.play > .container { display: flex; flex-direction: column; gap: 1.1rem; }
+
+/* Controls and log sit side by side beneath the game, so neither of them
+   competes with it for width. */
+.play-below {
+  display: grid;
+  gap: 1.1rem;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+@media (min-width: 900px) {
+  .play-below { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+}
+
+/* -- stage (the one dark surface) ----------------------------------------- */
+
+.cabinet {
+  border-radius: var(--radius-lg);
+  background: var(--screen);
+  border: 1px solid #0b0f16;
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+}
+
+/**
+ * The cabinet spans the full width; the picture is capped by height and
+ * centred, so the dark surround reads as a bezel rather than as wasted page.
+ * The sim renders 320x240, so width is derived from the height cap at 4:3.
+ */
+.stage {
+  position: relative;
+  background: var(--screen);
+  line-height: 0;
+  display: flex;
+  justify-content: center;
+}
+.pixi { width: min(100%, calc(min(64vh, 640px) * 4 / 3)); }
+.pixi canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+
+.full-toggle {
+  position: absolute;
+  top: .6rem;
+  right: .6rem;
+  z-index: 2;
+  font-size: .72rem;
+  font-weight: 500;
+  padding: .3rem .6rem;
+  line-height: 1.4;
+  background: rgb(13 17 25 / 0.72);
+  color: var(--screen-ink);
+  border: 1px solid var(--screen-line);
+  opacity: .55;
+  transition: opacity .15s ease, background .15s ease;
+}
+.cabinet:hover .full-toggle,
+.full-toggle:focus-visible { opacity: 1; }
+.full-toggle:hover:not(:disabled) { background: rgb(13 17 25 / 0.95); color: #fff; }
+
+.cabinet:fullscreen {
+  border-radius: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  background: #05070b;
+}
+.cabinet:fullscreen .stage { flex: 1; align-items: center; }
+.cabinet:fullscreen .pixi { width: min(100vw, calc((100vh - 4.5rem) * 4 / 3)); }
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  /* Flex, not `grid; place-content: center`: a centred grid track is sized to
+     max-content and would push long copy past a narrow stage. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.5rem;
+  gap: .35rem;
+  background: rgb(8 11 18 / 0.88);
+  color: var(--screen-ink);
+  font-family: var(--mono);
+  font-size: .85rem;
+  line-height: 1.6;
+}
+.overlay h2 {
+  font-family: var(--display);
+  font-size: clamp(1.1rem, 3vw, 1.5rem);
+  color: #fff;
+  margin-bottom: .2rem;
+}
+.overlay .dim { color: var(--screen-dim); }
+.overlay.bad { color: #ff8f8f; }
+.overlay kbd {
+  background: #161c28;
+  border-color: var(--screen-line);
+  color: var(--screen-ink);
+}
+
+/* HUD sits on the cabinet's chin, not in the page — it belongs to the screen. */
+.hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem 1.4rem;
+  padding: .7rem 1rem;
+  border-top: 1px solid var(--screen-line);
+  background: #0a0e15;
+  font-family: var(--mono);
+  font-size: .8rem;
+  color: var(--screen-ink);
+}
+.hud b { color: var(--screen-dim); font-weight: 400; margin-right: .4rem; }
+.hud .seed { flex-basis: 100%; word-break: break-all; color: var(--screen-dim); }
+.hud .seed b { color: #4c5a72; }
+
+/* -- controls ------------------------------------------------------------- */
+
+.field-row {
+  display: flex;
+  gap: .55rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.field-row + .field-row { margin-top: .8rem; }
+
+.field { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.field.grow { flex: 1 1 15rem; }
+.field .hint { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); }
+
+/* `.field .label` is the same thing over a read-only value, where there is no
+   control for a real <label> to point at. */
+label,
+.field .label {
+  font-family: var(--mono);
+  font-size: .7rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+input {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: .5rem .65rem;
+  font-family: var(--mono);
+  font-size: .85rem;
+  min-width: 0;
+  width: 100%;
+}
+input:hover { border-color: #c6d3e1; }
+input:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
+#slot { width: 5rem; }
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: .82rem;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: .45rem .6rem;
+}
+.identity .arrow { color: var(--ink-faint); }
+
+.actions { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
+.actions .hint { font-size: .8rem; color: var(--ink-faint); margin-left: auto; }
+
+/* -- proof stepper (signature element) ------------------------------------ */
+
+/**
+ * Horizontal, under the game. Pips on a shared baseline with the label beneath
+ * each one, connected left to right — the trace has to answer "where am I"
+ * without taking width the game wants. The full argument for each step lives
+ * on the write-up page and in the hover title.
+ */
+.stepper { padding: 1.1rem 1.25rem; }
+
+.rail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem .5rem;
+}
+@media (min-width: 760px) {
+  .rail { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; }
+}
+
+.rail li {
+  position: relative;
+  text-align: center;
+  cursor: default;
+  min-width: 0;
+}
+
+/* the connector, drawn between this pip and the next */
+@media (min-width: 760px) {
+  .rail li:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: calc(50% + 17px);
+    right: calc(-50% + 17px);
+    top: 12.5px;
+    height: 1px;
+    background: var(--line);
+  }
+  .rail li.done:not(:last-child)::before { background: var(--ok); }
+}
+
+.rail .pip {
+  width: 26px;
+  height: 26px;
+  margin: 0 auto .55rem;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  display: grid;
+  place-content: center;
+  font-family: var(--mono);
+  font-size: .68rem;
+  font-weight: 500;
+  color: var(--ink-faint);
+  position: relative;
+  z-index: 1;
+  transition: background .2s ease, border-color .2s ease, color .2s ease;
+}
+.rail li.active .pip { border-color: var(--primary); color: var(--primary); background: var(--primary-wash); }
+.rail li.done .pip { border-color: var(--ok); background: var(--ok); color: #fff; }
+.rail li.failed .pip { border-color: var(--bad); background: var(--bad); color: #fff; }
+
+.rail .what {
+  display: block;
+  font-size: .78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink);
+  padding-inline: .25rem;
+}
+.rail li.idle .what { color: var(--ink-faint); font-weight: 500; }
+.rail li.active .what { color: var(--primary-deep); }
+.rail li.failed .what { color: var(--bad); }
+
+/* The short label carries the state; the full sentence is for screen readers. */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.rail li.active .pip {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(0 95 200 / 0.28); }
+  50%      { box-shadow: 0 0 0 5px rgb(0 95 200 / 0); }
+}
+
+/* -- verdict (the two-score confrontation) -------------------------------- */
+
+.verdict {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: .75rem;
+  text-align: center;
+}
+.verdict .side { min-width: 0; }
+.verdict .who {
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  display: block;
+  margin-bottom: .3rem;
+}
+.verdict .num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(1.4rem, 5vw, 2.1rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  word-break: break-all;
+}
+.verdict .op {
+  font-family: var(--mono);
+  font-size: 1.2rem;
+  font-weight: 600;
+  width: 2.3rem;
+  height: 2.3rem;
+  display: grid;
+  place-content: center;
+  border-radius: 50%;
+  flex: none;
+}
+.verdict.agree .op { background: var(--ok-wash); color: var(--ok); }
+.verdict.agree .num { color: var(--ok); }
+.verdict.differ .op { background: var(--bad-wash); color: var(--bad); }
+.verdict.differ .num { color: var(--bad); }
+
+.verdict-note {
+  margin-top: .9rem;
+  padding-top: .9rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: .83rem;
+  color: var(--ink-soft);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .verdict.agree .op { animation: snap .45s cubic-bezier(.2, .9, .3, 1.4); }
+}
+@keyframes snap {
+  0%   { transform: scale(.72); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* -- trace log ------------------------------------------------------------ */
+
+.trace {
+  font-family: var(--mono);
+  font-size: .78rem;
+  line-height: 1.65;
+  max-height: 15rem;
+  overflow: auto;
+  padding: .85rem 1.1rem;
+  background: var(--surface);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.trace > div { white-space: pre-wrap; word-break: break-word; color: var(--ink-soft); }
+.trace .ok { color: var(--ok); }
+.trace .bad { color: var(--bad); }
+.trace .empty { color: var(--ink-faint); }
+
+.trace details { margin-top: .6rem; }
+.trace summary { cursor: pointer; color: var(--ink-faint); }
+.trace pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ink-soft);
+  font-size: .74rem;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: .7rem;
+  margin: .5rem 0 0;
+}
+
+/* -- callout -------------------------------------------------------------- */
+
+.callout {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--cyan);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: .85rem 1rem;
+  font-size: .87rem;
+  color: var(--ink-soft);
+}
+.callout strong { color: var(--ink); font-weight: 600; }
+.callout.spaced { margin-top: 2rem; }
+
+.after { margin-top: 2rem; }
+
+/* -- how-it-works page ---------------------------------------------------- */
+
+.doc { padding-bottom: 5rem; }
+
+.doc-toc {
+  position: sticky;
+  top: 76px;
+  align-self: start;
+  font-size: .85rem;
+  display: grid;
+  gap: .1rem;
+}
+.doc-toc a {
+  color: var(--ink-soft);
+  padding: .3rem .6rem;
+  border-left: 2px solid var(--line);
+  border-radius: 0 6px 6px 0;
+}
+.doc-toc a:hover { color: var(--primary); background: var(--surface-2); text-decoration: none; }
+
+.doc-grid { display: grid; gap: 2.5rem; grid-template-columns: 1fr; }
+@media (min-width: 940px) {
+  .doc-grid { grid-template-columns: 200px minmax(0, 1fr); gap: 3rem; }
+}
+
+.doc section { scroll-margin-top: 80px; }
+.doc section + section { margin-top: 3.5rem; }
+.doc section > h2 { font-size: clamp(1.45rem, 3.2vw, 2rem); margin-bottom: 1rem; }
+.doc h3 { font-size: 1.05rem; margin: 2rem 0 .6rem; }
+.doc p + p { margin-top: .9rem; }
+.doc section > p, .doc section > ul { max-width: 68ch; }
+.doc ul { color: var(--ink-soft); padding-left: 1.1rem; margin: .9rem 0 0; }
+.doc li + li { margin-top: .5rem; }
+.doc li::marker { color: var(--ink-faint); }
+.doc strong { font-weight: 600; color: var(--ink); }
+.doc code {
+  font-size: .86em;
+  background: var(--surface-2);
+  border-radius: 5px;
+  padding: .1em .35em;
+  color: var(--primary-deep);
+}
+
+/* numbered sequence — the handshake genuinely is ordered, so it is numbered */
+.steps { list-style: none; margin: 1.75rem 0 0; padding: 0; counter-reset: step; }
+.steps > li {
+  position: relative;
+  counter-increment: step;
+  padding: 0 0 1.6rem 3.4rem;
+}
+.steps > li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: -0.1rem;
+  font-family: var(--mono);
+  font-size: .78rem;
+  font-weight: 500;
+  color: var(--primary);
+  background: var(--primary-wash);
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 8px;
+  display: grid;
+  place-content: center;
+}
+.steps > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 1.1rem;
+  top: 2.4rem;
+  bottom: .3rem;
+  width: 1px;
+  background: var(--line);
+}
+.steps h3 { margin: 0 0 .3rem; font-size: 1rem; }
+.steps p { font-size: .9rem; color: var(--ink-soft); max-width: 62ch; }
+.steps .actor {
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  display: block;
+  margin-bottom: .25rem;
+}
+
+/* trust table */
+.table-wrap { overflow-x: auto; margin-top: 1.5rem; border: 1px solid var(--line); border-radius: var(--radius-lg); }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; min-width: 520px; }
+th, td { text-align: left; padding: .8rem 1rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+thead th {
+  font-family: var(--mono);
+  font-size: .7rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 500;
+  background: var(--surface);
+}
+tbody tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; }
+
+.pill {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: .7rem;
+  letter-spacing: .04em;
+  padding: .18rem .5rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  background: var(--bg);
+  white-space: nowrap;
+}
+.pill.none { border-color: #f0c9cf; color: var(--bad); background: var(--bad-wash); }
+.pill.hw { border-color: #b9e2c9; color: var(--ok); background: var(--ok-wash); }
+.pill.part { border-color: #cfe0f4; color: var(--primary); background: var(--primary-wash); }
+
+/* status list — what is done, what is not */
+.status { list-style: none; margin: 1.5rem 0 0; padding: 0; display: grid; gap: .1rem; }
+.status li {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: baseline;
+  padding: .85rem 0;
+  border-top: 1px solid var(--line-soft);
+}
+.status li:last-child { border-bottom: 1px solid var(--line-soft); }
+.status .state {
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.status .state.live { color: var(--ok); }
+.status .state.wip { color: var(--primary); }
+.status .state.open { color: var(--ink-faint); }
+.status .what { font-weight: 600; font-size: .92rem; }
+.status .why { color: var(--ink-soft); font-size: .87rem; margin-top: .15rem; }
+@media (max-width: 520px) {
+  .status li { grid-template-columns: 1fr; gap: .3rem; }
+}
+
+/* -- footer --------------------------------------------------------------- */
+
+.site-foot {
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: .875rem;
+  color: var(--ink-soft);
+}
+
+.foot-grid {
+  display: grid;
+  gap: 2.5rem;
+  grid-template-columns: 1fr;
+  padding-block: 3.5rem;
+}
+@media (min-width: 720px) {
+  .foot-grid { grid-template-columns: 1fr auto auto; gap: 4rem; }
+}
+
+.foot-brand {
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin-bottom: .6rem;
+}
+.foot-about { max-width: 36ch; line-height: 1.625; }
+.foot-warn { margin-top: 1.1rem; font-size: .78rem; color: var(--ink-faint); }
+
+/* Mono micro-heading over each link column — the eyebrow device, dialled down. */
+.foot-head {
+  font-family: var(--mono);
+  font-size: .58rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 1rem;
+}
+.foot-head.accent { color: var(--primary); opacity: .7; letter-spacing: .24em; }
+
+.foot-col { display: grid; gap: .55rem; align-content: start; }
+.foot-col a { color: var(--ink-soft); }
+.foot-col a:hover { color: var(--primary); text-decoration: none; }
+.foot-col a.with-icon { display: inline-flex; align-items: center; gap: .45rem; }
+.foot-col a.with-icon svg { width: 15px; height: 15px; flex: none; }
+
+.foot-rule { height: 1px; background: var(--line); }
+
+.foot-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 1.25rem;
+  font-size: .8rem;
+  color: var(--ink-faint);
+}
+.foot-bar .tagline {
+  font-family: var(--mono);
+  font-size: .62rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  opacity: .7;
+}
+
+/* -- technology credits (write-up page) ----------------------------------- */
+
+.built-on {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .75rem 1.75rem;
+  margin-top: 2rem;
+}
+.built-on .label {
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.built-on a {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  font-size: 1rem;
+  color: var(--ink);
+  opacity: .78;
+  transition: opacity .15s ease;
+}
+.built-on a:hover { opacity: 1; text-decoration: none; color: var(--ink); }
+.built-on svg { height: 20px; width: auto; display: block; }
+/* The Acurast mark is wide and light; the black chip is how it reads on their
+   own surfaces, and it balances Polkadot's solid mark beside it. */
+.built-on a:last-of-type svg {
+  height: 12px;
+  padding: 6px 7px;
+  background: #000;
+  border-radius: 6px;
+  box-sizing: content-box;
+}
+
+
+/* -- touch controls ------------------------------------------------------- */
+
+.touchpad {
+  display: flex;
+  justify-content: space-between;
+  gap: .6rem;
+  padding: .8rem;
+  background: #0a0e15;
+  border-top: 1px solid var(--screen-line);
+}
+.dpad { display: flex; gap: .6rem; }
+.touchpad button {
+  min-width: 4.5rem;
+  padding: .95rem 1.1rem;
+  font-size: 1rem;
+  background: #161c28;
+  color: var(--screen-ink);
+  border: 1px solid var(--screen-line);
+  border-radius: 10px;
+}
+.touchpad button:hover:not(:disabled) { background: #1c2432; }
+.touchpad button:active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.touchpad .jump { flex: 1; max-width: 12rem; font-weight: 700; letter-spacing: .06em; }
+
+/* Pointer-capable devices with a keyboard do not need the on-screen pad. */
+@media (hover: hover) and (pointer: fine) {
+  .touchpad { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -1,0 +1,15 @@
+[package]
+name = "sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Deliberately empty, and it should stay that way.
+#
+# This crate is the source of truth for game rules and is replayed inside a TEE
+# to attest scores. Every dependency is both a determinism risk (an algorithm
+# can change under a version bump) and a supply chain risk (it executes inside
+# the enclave). The fixed-point maths and the RNG are written out in-tree for
+# exactly this reason. Read crates/sim/src/rng.rs before adding anything here.
+[dependencies]

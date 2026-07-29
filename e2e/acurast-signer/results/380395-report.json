@@ -1,0 +1,71 @@
+{
+  "assignedProcessors": {
+    "id": "1",
+    "jsonrpc": "2.0",
+    "result": {
+      "processors": {
+        "5CHmRH4ceUVcjqNG3vkkDLk3NoLfkKMdyyqLKVVMzRbR5rdq": {
+          "ed25519": "7f3a49b9a9f0cc1c1f58c7a291add1e1a8045fbdac75f131a2d7510ba082efb0",
+          "encP256": "0286abdf6328e4f75f5025f8f6c48f151bc44a8bb92970b62a191b2e13b3307b07",
+          "p256": "03f00058487846bfd33b629e00fa8b042244fb49dbdcacf65e9a848841fcd1bcb9",
+          "secp256k1": "020e78df25c96cfbbd3022532e24d172646bd3227cf7382d2f21e5a92726761976"
+        }
+      }
+    }
+  },
+  "bridgeSocketSet": true,
+  "collectedAt": 1785319095,
+  "deploymentId": {
+    "error": {
+      "code": -32601,
+      "message": "Method not found"
+    },
+    "id": "1",
+    "jsonrpc": "2.0"
+  },
+  "deploymentPublicKeys": {
+    "id": "1",
+    "jsonrpc": "2.0",
+    "result": {
+      "publicKeys": {
+        "ed25519": "7f3a49b9a9f0cc1c1f58c7a291add1e1a8045fbdac75f131a2d7510ba082efb0",
+        "p256": "03f00058487846bfd33b629e00fa8b042244fb49dbdcacf65e9a848841fcd1bcb9",
+        "secp256k1": "020e78df25c96cfbbd3022532e24d172646bd3227cf7382d2f21e5a92726761976"
+      }
+    }
+  },
+  "processorVersion": {
+    "id": "1",
+    "jsonrpc": "2.0",
+    "result": {
+      "version": "1.26.0-canary"
+    }
+  },
+  "signatures": {
+    "digest32": {
+      "input": "1901aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inputBytes": 32,
+      "signature": "d2acabe46b16be480e2f10cc4a703d2f405df21c72af24a668a33c4522cff9e156e5867931233cac547517f9d181309aa65902674d357ad71426534d1ee78903",
+      "signatureBytes": 64
+    },
+    "digest32_again": {
+      "input": "1901aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inputBytes": 32,
+      "signature": "d2acabe46b16be480e2f10cc4a703d2f405df21c72af24a668a33c4522cff9e156e5867931233cac547517f9d181309aa65902674d357ad71426534d1ee78903",
+      "signatureBytes": 64
+    },
+    "short5": {
+      "input": "deadbeef42",
+      "inputBytes": 5,
+      "signature": "198b89b52f7930c6174f4104a5ba237151ccd4c6b374c93882b2a6b233c130e9365dd4e1e43d51622994a8a9a2d7acbfdc09992889d8bfd405cf237ce5c960fb",
+      "signatureBytes": 64
+    }
+  },
+  "signerPublicKeySecp256k1": {
+    "id": "1",
+    "jsonrpc": "2.0",
+    "result": {
+      "publicKey": "020e78df25c96cfbbd3022532e24d172646bd3227cf7382d2f21e5a92726761976"
+    }
+  }
+}
