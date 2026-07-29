@@ -37,9 +37,9 @@
       "minProcessorReputation": 0,
 
       "usageLimit": {
-        "maxMemory": 1000000000,
-        "maxNetworkRequests": 10000,
-        "maxStorage": 4000000000
+        "maxMemory": 2000,
+        "maxNetworkRequests": 10,
+        "maxStorage": 10000
       },
 
       "maxCostPerExecution": 80000000000,

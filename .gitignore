@@ -8,3 +8,7 @@
 **/.env
 
 node_modules/
+
+# Python bytecode — the Acurast bundler zips fileUrl verbatim, no ignore support
+__pycache__/
+*.pyc
