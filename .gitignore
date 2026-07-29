@@ -1,0 +1,4 @@
+/target
+
+# Acurast CLI scratch (logs + staged deploy bundles)
+.acurast/
