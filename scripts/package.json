@@ -4,6 +4,8 @@
   "type": "module",
   "description": "Devnet ops: call PolkaVM contracts as the mapped Substrate account, which cast cannot do.",
   "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@polkadot-api/descriptors": "file:.papi/descriptors",
     "@polkadot-labs/hdkd": "^0.0.29",
     "@polkadot-labs/hdkd-helpers": "^0.0.31",
