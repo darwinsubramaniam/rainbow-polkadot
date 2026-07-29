@@ -11,6 +11,15 @@
     <meta name="theme-color" content="#ffffff" />
 
     <!--
+      The mark. favicon.svg is a reduced cut of RainbowMark — five heavy dots on
+      the inner arc rather than seven light ones, because at 16px the light ones
+      fall under a device pixel. apple-touch-icon.png is opaque and padded: iOS
+      masks it to a rounded square and supplies no ground of its own.
+    -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!--
       Plus Jakarta Sans for display, Geist for body, Geist Mono for data. Loaded
       from a third-party origin, which the Product sandbox permits (docs/E0.1).
       If it is ever blocked, the stacks in styles.css fall back to

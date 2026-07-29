@@ -1,4 +1,4 @@
-import { GitHubMark } from "./Logos";
+import { GitHubMark, RainbowMark } from "./Logos";
 import type { Route } from "./useHashRoute";
 
 const REPO = "https://github.com/darwinsubramaniam/rainbow-polkadot";
@@ -15,7 +15,7 @@ export function SiteHeader({ route }: { route: Route }) {
     <header className="site-head">
       <div className="container">
         <a className="brand" href="#/">
-          <span className="mark" aria-hidden="true" />
+          <RainbowMark />
           Rainbow
         </a>
         <nav className="site-nav" aria-label="Main">
@@ -44,7 +44,10 @@ export function SiteFooter() {
     <footer className="site-foot">
       <div className="container foot-grid">
         <div className="foot-about">
-          <p className="foot-brand">Rainbow</p>
+          <p className="foot-brand">
+            <RainbowMark className="is-mono" />
+            Rainbow
+          </p>
           <p>
             A platformer whose score is recomputed inside a TEE and proven on-chain. Built as a proof-of-concept for
             what a Polkadot Product can do.

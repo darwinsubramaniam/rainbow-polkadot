@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    Rainbow's mark: a double rainbow. The outer arc is the score the browser
+    computed; the dotted inner one is the enclave recomputing it. Concentric
+    because they agree.
+
+    This is the SMALL-SIZE CUT of RainbowMark in src/ui/Logos.tsx, not a copy of
+    it. A favicon is drawn at 16px, where the inner arc's seven 2.5-wide dots
+    land under one device pixel each and disappear — taking the whole concept
+    with them. So here the inner arc carries five heavier dots instead of seven
+    light ones. Same idea, legible at the size it actually ships at.
+
+    Colours are literal rather than var()-driven: a favicon has no stylesheet.
+    The deep-navy inner arc vanishes on a dark tab strip and the cool end of the
+    spectrum goes muddy there, so both lift under prefers-color-scheme: dark.
+    Keep the geometry in step with Logos.tsx; the weights deliberately differ.
+  -->
+  <style>
+    .echo { stroke: #020e42 }
+    @media (prefers-color-scheme: dark) {
+      .echo { stroke: #c9d4e6 }
+      .c5 { stroke: #22b8d8 }
+      .c6 { stroke: #4d92ff }
+      .c7 { stroke: #8a6bff }
+    }
+  </style>
+
+  <g fill="none" stroke-width="3.4">
+    <path d="M4.254 25.275 A12.5 12.5 0 0 1 3.748 18.524"  stroke="#ff6b6b"/>
+    <path d="M3.748 18.524 A12.5 12.5 0 0 1 6.837 12.498"  stroke="#ff9f45"/>
+    <path d="M6.837 12.498 A12.5 12.5 0 0 1 12.617 8.966"  stroke="#ffd166"/>
+    <path d="M12.617 8.966 A12.5 12.5 0 0 1 19.383 8.966"  stroke="#3ddc84"/>
+    <path d="M19.383 8.966 A12.5 12.5 0 0 1 25.163 12.498" stroke="#0082a2" class="c5"/>
+    <path d="M25.163 12.498 A12.5 12.5 0 0 1 28.252 18.524" stroke="#005fc8" class="c6"/>
+    <path d="M28.252 18.524 A12.5 12.5 0 0 1 27.746 25.275" stroke="#4b2fd6" class="c7"/>
+  </g>
+
+  <path class="echo" d="M8.952 23.565 A7.5 7.5 0 1 1 23.048 23.565"
+        fill="none" stroke-width="3.2" stroke-linecap="round"
+        stroke-dasharray="0.01 5.75"/>
+</svg>

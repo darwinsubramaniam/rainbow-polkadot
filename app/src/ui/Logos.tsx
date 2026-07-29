@@ -1,15 +1,70 @@
 /**
- * Technology marks, inlined.
+ * Marks, inlined.
  *
- * Both are the projects' own current artwork, path-for-path: Polkadot's from
- * the light-background mark it serves at polkadot.com/favicon-light.svg, and
- * Acurast's from the green mark in the lockup at acurast.com. Inlined rather
- * than fetched because the bundle is uploaded against a byte quota and two
- * more network round-trips buy nothing.
+ * The technology marks are the projects' own current artwork, path-for-path:
+ * Polkadot's from the light-background mark it serves at
+ * polkadot.com/favicon-light.svg, and Acurast's from the green mark in the
+ * lockup at acurast.com. Inlined rather than fetched because the bundle is
+ * uploaded against a byte quota and two more network round-trips buy nothing.
  *
  * Each is paired with its name set in this site's own display face rather than
  * a reproduced wordmark — the mark is the part that has to be exact.
  */
+
+/**
+ * Rainbow's own mark: the run, and its echo.
+ *
+ * A double rainbow. The outer arc is solid — the score your browser computed.
+ * The inner one is the same arc sampled into dots — the enclave recomputing it
+ * from your keypresses alone. They are concentric because they agree, which is
+ * the entire claim the project makes, and is literally the panel the app shows
+ * you after a run.
+ *
+ * Both arcs sweep 220° rather than a flat 180°, so the mark fills a square
+ * instead of letterboxing itself into the bottom half of one.
+ *
+ * The outer arc is seven butt-capped segments rather than one gradient stroke.
+ * Adjacent segments share an endpoint on the same circle, so their tangents
+ * match and the joins are seamless — and unlike a gradient, per-segment fills
+ * inherit CSS variables, which is what lets the one-ink cut below be a class
+ * rather than a second drawing.
+ *
+ * The seven colours are not a new palette. Four come out of the game itself
+ * (renderer.ts: spike, coin, goal) and three are the site's own cyan, primary,
+ * and the violet that used to end the placeholder gradient — so the mark and
+ * the world it points at are made of the same pigment.
+ *
+ * Decorative rather than labelled: both places it appears sit directly beside
+ * the word "Rainbow", and a `role="img"` here would make screen readers say the
+ * name twice.
+ */
+export function RainbowMark({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" className={`rainbow-mark ${className}`.trim()} aria-hidden="true" focusable="false">
+      {/* Outer: r=12.5 about (16, 21), 200° → -20°, in seven equal segments. */}
+      <g fill="none" strokeWidth="3.4">
+        <path d="M4.254 25.275 A12.5 12.5 0 0 1 3.748 18.524" stroke="var(--rm-1)" />
+        <path d="M3.748 18.524 A12.5 12.5 0 0 1 6.837 12.498" stroke="var(--rm-2)" />
+        <path d="M6.837 12.498 A12.5 12.5 0 0 1 12.617 8.966" stroke="var(--rm-3)" />
+        <path d="M12.617 8.966 A12.5 12.5 0 0 1 19.383 8.966" stroke="var(--rm-4)" />
+        <path d="M19.383 8.966 A12.5 12.5 0 0 1 25.163 12.498" stroke="var(--rm-5)" />
+        <path d="M25.163 12.498 A12.5 12.5 0 0 1 28.252 18.524" stroke="var(--rm-6)" />
+        <path d="M28.252 18.524 A12.5 12.5 0 0 1 27.746 25.275" stroke="var(--rm-7)" />
+      </g>
+      {/* Inner: same centre and sweep at r=7.5. Zero-length round dashes are
+          dots; the 4.11 gap divides the 28.8 arc length into seven of them, one
+          per band of the arc above. */}
+      <path
+        d="M8.952 23.565 A7.5 7.5 0 1 1 23.048 23.565"
+        fill="none"
+        stroke="var(--rm-ink)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeDasharray="0.01 4.11"
+      />
+    </svg>
+  );
+}
 
 export function PolkadotMark() {
   return (
