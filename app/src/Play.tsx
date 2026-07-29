@@ -51,8 +51,30 @@ export function Play() {
   // chain access, but the game and the enclave round-trip still work.
   const app = useContext(ProductSDKContext);
   const signer = useSignerState();
+
+  const account = signer.selectedAccount ?? signer.accounts[0] ?? null;
+  // The H160 pallet-revive maps this account to. It is what the contract
+  // credits AND what the enclave hashes into sessionId, so it must be derived
+  // identically on both sides.
+  const player = account ? playerAddress(account.address) : null;
+
+  // Persisted, because a player who turned the sound off meant it. Applied to
+  // the sound module by the effect below rather than passed down, so toggling
+  // it mid-run re-renders nothing that the game loop touches.
+  const [muted, setMuted] = useStoredJson("rainbow.muted", false);
+
   const mountRef = useRef<HTMLDivElement | null>(null);
-  const game = useGame(mountRef);
+  // The address is passed for one reason only: it picks which of the pack's
+  // five characters the player is drawn as, so a returning player is the same
+  // character every time. It reaches nothing that is attested.
+  const game = useGame(mountRef, player);
+
+  // Also depends on `ready`: the preference is set before the audio has
+  // finished loading, and would otherwise be dropped on the floor.
+  const applyMuted = game.setMuted;
+  useEffect(() => {
+    applyMuted(muted);
+  }, [muted, game.ready, applyMuted]);
 
   // The URL persists as it is edited, so a reload does not cost the user a
   // pasted tunnel hostname. There was previously a separate uncommitted draft,
@@ -119,11 +141,6 @@ export function Play() {
     };
   }, [simulated, sim, say]);
 
-  const account = signer.selectedAccount ?? signer.accounts[0] ?? null;
-  // The H160 pallet-revive maps this account to. It is what the contract
-  // credits AND what the enclave hashes into sessionId, so it must be derived
-  // identically on both sides.
-  const player = account ? playerAddress(account.address) : null;
   const connecting = signer.status === "connecting";
 
   // -- session -------------------------------------------------------------
@@ -424,6 +441,11 @@ export function Play() {
 
             {!game.ready && !game.error && <div className="overlay">loading sim.wasm…</div>}
             {game.error && <div className="overlay bad">{game.error}</div>}
+            {/* Art is an enhancement: when the pack does not load the game
+                still runs, drawn from primitives. Saying so makes a sandbox
+                that will not serve public/art/ diagnosable from the page
+                instead of only from the console. */}
+            {game.ready && !game.art && <div className="art-notice dim">simple graphics</div>}
             {/* Before a run. The two overlays are mutually exclusive on
                 `session`, so toggling the simulator mid-result drops back to
                 this one rather than stacking both. */}
@@ -491,12 +513,20 @@ export function Play() {
               </div>
             )}
 
-            <button className="full-toggle" onClick={toggleFull}>
-              {full ? "Exit fullscreen" : "Fullscreen"}
-            </button>
+            <div className="stage-controls">
+              <button onClick={() => setMuted(!muted)} aria-pressed={muted}>
+                {muted ? "Sound off" : "Sound on"}
+              </button>
+              <button onClick={toggleFull}>{full ? "Exit fullscreen" : "Fullscreen"}</button>
+            </div>
           </div>
 
-          <Hud hud={game.hud} result={game.result} seed={session?.seed ?? null} />
+          <Hud
+            hud={game.hud}
+            result={game.result}
+            seed={session?.seed ?? null}
+            icons={game.icons}
+          />
           <TouchPad onPress={game.press} />
         </div>
 

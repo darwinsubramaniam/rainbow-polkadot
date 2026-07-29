@@ -43,3 +43,11 @@ app/public/sim.wasm
 
 # tsc -b incremental state
 *.tsbuildinfo
+app/.vite
+
+# Kenney's raw art pack. Unlike sim.wasm this is NOT regenerated per build — the
+# subset the app ships is committed under app/public/art/, and only the four
+# 64px spritesheets are used. The pack's Vector/, Double/, and loose Sprites/
+# directories are ~2.8 MB of source art and duplicate resolutions that nothing
+# reads. Download from kenney.nl and re-run app/scripts/pack-art.mjs to upgrade.
+kenney_new-platformer-pack-*/

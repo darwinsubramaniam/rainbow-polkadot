@@ -338,13 +338,36 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   justify-content: center;
 }
 .pixi { width: min(100%, calc(min(64vh, 640px) * 4 / 3)); }
-.pixi canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+/* No `image-rendering: pixelated`. The canvas is rendered at RENDER_SCALE and
+   then shrunk to fit by this rule, so the browser is downsampling — nearest
+   neighbour would alias the art's outlines rather than preserve them. */
+.pixi canvas { width: 100%; height: auto; display: block; }
 
-.full-toggle {
+/* Shown only when the art pack did not load and the game fell back to
+   primitives. Bottom-left, out of the way of `.full-toggle`, and quiet: it
+   reports a degraded look, not a failure. */
+.art-notice {
+  position: absolute;
+  left: .6rem;
+  bottom: .6rem;
+  z-index: 2;
+  font-size: .68rem;
+  line-height: 1;
+  letter-spacing: .04em;
+  pointer-events: none;
+}
+
+/* Stage controls sit in one row so adding a button does not mean hand-placing
+   it against the previous one's width. */
+.stage-controls {
   position: absolute;
   top: .6rem;
   right: .6rem;
   z-index: 2;
+  display: flex;
+  gap: .4rem;
+}
+.stage-controls button {
   font-size: .72rem;
   font-weight: 500;
   padding: .3rem .6rem;
@@ -355,9 +378,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   opacity: .55;
   transition: opacity .15s ease, background .15s ease;
 }
-.cabinet:hover .full-toggle,
-.full-toggle:focus-visible { opacity: 1; }
-.full-toggle:hover:not(:disabled) { background: rgb(13 17 25 / 0.95); color: #fff; }
+.cabinet:hover .stage-controls button,
+.stage-controls button:focus-visible { opacity: 1; }
+.stage-controls button:hover:not(:disabled) { background: rgb(13 17 25 / 0.95); color: #fff; }
 
 .cabinet:fullscreen {
   border-radius: 0;
@@ -444,6 +467,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   color: var(--screen-ink);
 }
 .hud b { color: var(--screen-dim); font-weight: 400; margin-right: .4rem; }
+
+/* Atlas sprites drawn in the DOM. Size and background are set inline from the
+   loaded pack (see Art.cssIcon), so these rules only handle placement. */
+.hud i {
+  display: inline-block;
+  vertical-align: -.22em;
+  background-repeat: no-repeat;
+}
+.hud .icons { display: inline-flex; gap: .12rem; }
+.hud .icon-inline { margin-right: .3rem; }
 .hud .seed { flex-basis: 100%; word-break: break-all; color: var(--screen-dim); }
 .hud .seed b { color: #4c5a72; }
 

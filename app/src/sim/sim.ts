@@ -45,6 +45,18 @@ interface SimExports {
 export interface Entity {
   x: number;
   y: number;
+  /**
+   * Index of this entity's slot in the simulation's fixed-size array.
+   *
+   * Not the index in the array below: dead entities are skipped, so that one
+   * shifts down as the run goes on. Anything cosmetic keyed off identity —
+   * which enemy is a snail, which coin is mid-spin — has to use the slot, or
+   * every survivor changes appearance the moment one of them dies.
+   *
+   * Read out of the loop counter here rather than from the wasm, so this costs
+   * nothing and needs no ABI change.
+   */
+  slot: number;
 }
 
 export interface Snapshot {
@@ -160,11 +172,15 @@ export class Sim {
     let off = p + 48;
     for (let i = 0; i < this.maxEnemies; i++, off += 12) {
       if (d.getUint8(off + 8) === 0) continue;
-      snap.enemies.push({ x: d.getInt32(off, true) / FX, y: d.getInt32(off + 4, true) / FX });
+      snap.enemies.push({ slot: i, x: d.getInt32(off, true) / FX, y: d.getInt32(off + 4, true) / FX });
     }
     for (let i = 0; i < this.maxCoins; i++, off += 12) {
       if (d.getUint8(off + 8) === 0) continue;
-      snap.coinsOnField.push({ x: d.getInt32(off, true) / FX, y: d.getInt32(off + 4, true) / FX });
+      snap.coinsOnField.push({
+        slot: i,
+        x: d.getInt32(off, true) / FX,
+        y: d.getInt32(off + 4, true) / FX,
+      });
     }
     return snap;
   }
