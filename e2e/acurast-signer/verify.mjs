@@ -217,15 +217,21 @@ if (short) {
     console.log("5-byte input REJECTED — consistent with expecting a pre-computed 32-byte digest");
   } else {
     const shortInput = hexToBytes(strip(short.input));
+    const raw = recovers(short.signature, shortInput, address);
     const hashingMatch = HYPOTHESES.filter((h) => h.id !== "raw32").find(
       (h) => recovers(short.signature, h.apply(shortInput), address),
     );
     if (hashingMatch) {
       console.log(`5-byte input signed via ${hashingMatch.id} — the runtime hashes its input`);
+    } else if (raw) {
+      console.log(
+        "5-byte input signed and recovers WITHOUT hashing — so the runtime treats\n" +
+          "`bytes` as digest material and pads short input to 32 bytes rather than\n" +
+          "hashing it. Consistent with the 32-byte result.",
+      );
     } else {
       console.log(
-        "5-byte input signed, but under no tested hypothesis — the runtime likely\n" +
-          "pads or truncates short inputs to 32 bytes. Inconclusive on its own;\n" +
+        "5-byte input signed but matched nothing — inconclusive on its own;\n" +
           "trust the 32-byte result above.",
       );
     }
