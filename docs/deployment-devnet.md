@@ -40,6 +40,40 @@ it accepts nothing until a real Acurast deployment key is registered — it fail
 The submission was also relayed: sent by the Substrate account, credited to
 `0x…00A1`. Gasless relaying works on the real chain.
 
+## There are two deployment paths, and the simpler one is official
+
+The [Polkadot docs](https://docs.polkadot.com/smart-contracts/dev-environments/foundry/)
+describe a completely different workflow to `cdm`: **upstream** Foundry nightly
+(`curl -L https://foundry.paradigm.xyz | bash`, `foundryup --version nightly`), plain
+`forge build`, then `forge create --rpc-url … --private-key … --broadcast`.
+
+Both were tested against the same chain (`chainId 420420417` — the docs' "Polkadot TestNet"
+RPC and the devnet Asset Hub RPC report the identical id).
+
+| | `cdm` | `forge create` |
+|---|---|---|
+| Deployed at | `0x9cc62a70…` | `0x5029d587…` |
+| Toolchain | **foundry-polkadot** (`--resolc`) | **upstream Foundry** |
+| Bytecode | PolkaVM, 37 KB | EVM, 4.5 KB |
+| Owner | mapped Substrate H160 | your ECDSA account |
+| Owner calls | `revive.call` + papi (`scripts/revive-call.mjs`) | plain **`cast send`** ✓ |
+| CDM registry | **yes** — resolve by name | no |
+
+`pallet-revive` accepts **both** EVM and PolkaVM bytecode, which is why the upstream path
+works at all.
+
+> **Correcting an earlier claim.** Installing foundry-polkadot is required **for `cdm`**,
+> because `cdm` shells out to `forge build --resolc`. It is *not* required to deploy to this
+> chain. Anything above that reads as "you need the fork to deploy" is too strong — you need
+> it to use `cdm`.
+
+**Which to use.** Rainbow stays on `cdm`, because the CDM registry gives name-based contract
+resolution that `@parity/product-sdk-contracts` consumes from the Product app — worth the
+operational friction. For rapid iteration, or any contract the app does not resolve by name,
+`forge create` is markedly simpler: your own ECDSA key owns it and `cast` does everything.
+
+`0x5029d587…` was deployed purely to settle this comparison and is not part of the system.
+
 ## Toolchain — three things that are not obvious
 
 ### 1. `cdm build` needs foundry-polkadot, not upstream Foundry
