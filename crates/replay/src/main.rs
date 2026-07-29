@@ -271,7 +271,13 @@ fn check_rejections_agree(vm: &mut WasmSim) -> Result<()> {
         ("non-monotonic", entries(&[(10, 1), (5, 0)])),
         ("duplicate tick", entries(&[(10, 1), (10, 0)])),
         ("invalid buttons", entries(&[(0, 0xFF)])),
-        ("undefined button bit", entries(&[(0, 0b100)])),
+        // The lowest bit above VALID_BUTTONS, whatever that currently is —
+        // written this way so adding a real button cannot quietly turn this
+        // negative case into a valid input the way a hard-coded 0b100 did.
+        (
+            "undefined button bit",
+            entries(&[(0, sim::VALID_BUTTONS + 1)]),
+        ),
         ("tick beyond limit", entries(&[(sim::MAX_TICKS, 1)])),
     ];
 
@@ -342,6 +348,11 @@ fn export(seeds: usize, out: PathBuf, wasm: PathBuf) -> Result<()> {
 /// These stand in for real play: bursts of held direction with varied dwell
 /// times, which exercises the acceleration/friction/clamp paths and produces
 /// long runs. Derived from the seed so the whole harness is reproducible.
+///
+/// Jump is drawn independently of direction, and with a shorter dwell, because
+/// the interesting physics lives in the air: collision resolution while moving
+/// on both axes, the jump-cut edge, stomps, and landing. A log that only ever
+/// walked would leave all of that unfuzzed.
 fn synth_log(seed: u64) -> Vec<LogEntry> {
     let mut r = Pcg32::new(seed ^ 0x5eed_0f5e_ed0f_5eed);
     let mut log = Vec::new();
@@ -349,14 +360,20 @@ fn synth_log(seed: u64) -> Vec<LogEntry> {
 
     while tick < sim::MAX_TICKS {
         let hold = r.range(3, 45) as u32;
-        let buttons = match r.below(4) {
+        let dir = match r.below(4) {
             0 => 0,
             1 => sim::BUTTON_LEFT,
             2 => sim::BUTTON_RIGHT,
             // Both directions at once is legal input and must cancel cleanly.
             _ => sim::BUTTON_LEFT | sim::BUTTON_RIGHT,
         };
-        log.push(LogEntry { tick, buttons });
+        // Roughly half the segments hold jump, which mixes tapped and held
+        // jumps across the run.
+        let jump = if r.below(2) == 0 { sim::BUTTON_JUMP } else { 0 };
+        log.push(LogEntry {
+            tick,
+            buttons: dir | jump,
+        });
         tick = tick.saturating_add(hold);
         if tick >= sim::MAX_TICKS {
             break;

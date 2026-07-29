@@ -1,0 +1,137 @@
+:root {
+  color-scheme: dark;
+  --bg: #10131a;
+  --panel: #171b25;
+  --line: #262c3a;
+  --ink: #e6e9f0;
+  --dim: #8b93a7;
+  --ok: #3ddc84;
+  --bad: #ff6b6b;
+  --accent: #7aa2f7;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; background: var(--bg); }
+
+body {
+  color: var(--ink);
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The play surface uses press-and-hold; browser touch gestures would fight it. */
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.boot { padding: 24px; color: var(--dim); }
+
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 12px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+header h1 { font-size: 1rem; margin: 0; letter-spacing: .04em; }
+header p { margin: .2rem 0 0; color: var(--dim); }
+
+/* -- play surface -------------------------------------------------------- */
+
+.stage {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0a0c12;
+  line-height: 0;
+}
+
+.pixi canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  padding: 16px;
+  background: rgba(8, 10, 16, .86);
+  line-height: 1.55;
+}
+.overlay h2 { margin: 0 0 .3rem; font-size: 1.2rem; }
+.overlay p { margin: 0; }
+.overlay.bad { color: var(--bad); }
+
+/* -- panels -------------------------------------------------------------- */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.hud { display: flex; gap: 16px; flex-wrap: wrap; }
+.hud b { color: var(--dim); font-weight: 400; }
+.hud .seed { flex-basis: 100%; word-break: break-all; }
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row + .row { margin-top: 8px; }
+
+label { color: var(--dim); }
+
+input {
+  background: #0d1017;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: .4rem .5rem;
+  font: inherit;
+  min-width: 0;
+}
+#verifier { flex: 1 1 16rem; }
+#slot { width: 4.5rem; }
+
+button {
+  background: var(--accent);
+  color: #0b1020;
+  font: inherit;
+  font-weight: 700;
+  border: 0;
+  border-radius: 4px;
+  padding: .45rem .9rem;
+  cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 400; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+
+.mono { font-variant-numeric: tabular-nums; }
+.dim { color: var(--dim); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+
+.log { max-height: 16rem; overflow: auto; }
+.log div { white-space: pre-wrap; word-break: break-word; }
+.log pre { white-space: pre-wrap; word-break: break-all; color: var(--dim); font-size: .82rem; }
+
+/* -- touch controls ------------------------------------------------------ */
+
+.touchpad { display: flex; justify-content: space-between; gap: 10px; }
+.dpad { display: flex; gap: 10px; }
+.touchpad button {
+  min-width: 4.5rem;
+  padding: .9rem 1.1rem;
+  font-size: 1rem;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.touchpad button:active { background: var(--accent); color: #0b1020; }
+.touchpad .jump { flex: 1; max-width: 12rem; }
+
+/* Pointer-capable devices with a keyboard do not need the on-screen pad. */
+@media (hover: hover) and (pointer: fine) {
+  .touchpad { display: none; }
+}

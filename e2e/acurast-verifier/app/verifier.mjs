@@ -33,11 +33,22 @@ const MAX_SESSIONS_PER_EPOCH = Number(process.env.MAX_SESSIONS_PER_EPOCH ?? "12"
 // Host RPC — abstract Unix socket, JSON-RPC 2.0, ONE call per connection.
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve BRIDGE_SOCKET to a connectable path.
+ *
+ * Acurast hands us an *abstract* socket name, which is a Linux-only concept
+ * signalled by a leading NUL byte. macOS has no equivalent, so a name given as
+ * a filesystem path is used as-is — that is the only way to exercise this file
+ * on a developer machine, and it costs nothing in production, where the runtime
+ * always supplies a bare abstract name.
+ */
+const socketPath = (name) => (name.startsWith("/") || name.startsWith(".") ? name : "\0" + name);
+
 function rpc(method, params = [], timeout = 20000) {
   return new Promise((resolve) => {
     const name = process.env.BRIDGE_SOCKET;
     if (!name) return resolve({error: "BRIDGE_SOCKET unset"});
-    const sock = net.connect({path: "\0" + name});
+    const sock = net.connect({path: socketPath(name)});
     let buf = "";
     const done = (v) => {
       try { sock.destroy(); } catch {}
@@ -104,7 +115,7 @@ const RULES_HASH = "0x" + bytesToHex(keccak_256(wasmBytes));
 
 // The rules hash is computed from the artifact we are ACTUALLY executing, never
 // configured. The enclave therefore cannot attest for a ruleset it is not running.
-if (sim.exports.sim_abi_version() !== 1) throw new Error("sim.wasm ABI mismatch");
+if (sim.exports.sim_abi_version() !== 2) throw new Error("sim.wasm ABI mismatch");
 
 function replay(seed, log) {
   const bytes = new Uint8Array(log.length * 8);
@@ -260,6 +271,69 @@ async function attest({player, epoch, k, inputLog}) {
 }
 
 // ---------------------------------------------------------------------------
+// Session issuance
+// ---------------------------------------------------------------------------
+
+/**
+ * Hand out the seed for a session so the client can actually play it.
+ *
+ * The level is generated from the seed, so without this the player has nothing
+ * to render. That makes the seed a thing we must *release* rather than keep —
+ * but only on terms that preserve the anti-grinding property:
+ *
+ *   - CURRENT EPOCH ONLY. This is the load-bearing restriction. `attest` and the
+ *     contract both accept any epoch <= current, because a run played at the end
+ *     of one epoch may legitimately be submitted in the next. Issuing *seeds* on
+ *     those terms would be a different matter entirely: a player could walk back
+ *     through every past epoch and harvest 12 seeds from each, sample them all
+ *     offline, and play only the friendliest. Restricting issuance to the
+ *     current epoch is what keeps the cap at {maxSessionsPerEpoch} per hour.
+ *
+ *   - k < maxSessionsPerEpoch, matching the contract. A seed the contract would
+ *     never accept a submission for is not worth deriving.
+ *
+ * Seeds stay unguessable regardless: `deriveSeed` is a signature under a key
+ * inside the secure element, so knowing one seed says nothing about the next.
+ * A player still cannot compute a seed offline — they can only ask for the
+ * twelve they are entitled to and must play each one to find out what it holds.
+ *
+ * Known limitation, stated rather than hidden: requests are unauthenticated, so
+ * anyone may ask for any address's seeds and learn which levels that player will
+ * face. It consumes nothing (sessions are spent on-chain at submit, not here)
+ * and any resulting score still credits the bound player, so it is an
+ * information leak rather than a theft. Binding this to a wallet signature is
+ * the obvious hardening and is not done here.
+ */
+async function session({player, epoch, k}) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(player ?? "")) throw new Error("bad player address");
+
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  const currentEpoch = now / EPOCH_SECONDS;
+  const e = epoch === undefined || epoch === null ? currentEpoch : BigInt(epoch);
+
+  if (e !== currentEpoch) {
+    throw new Error(`seeds are issued for the current epoch only (${currentEpoch})`);
+  }
+  if (!(k >= 0 && k < MAX_SESSIONS_PER_EPOCH)) throw new Error("session index out of range");
+
+  const sessionId = sessionIdFor(player, e, k);
+  const seed = await deriveSeed(sessionId);
+
+  return {
+    player,
+    epoch: Number(e),
+    k,
+    sessionId,
+    // Decimal string: a u64 seed does not survive JSON's number type intact.
+    seed: seed.toString(),
+    gameId: Number(GAME_ID),
+    rulesHash: RULES_HASH,
+    maxSessionsPerEpoch: Number(MAX_SESSIONS_PER_EPOCH),
+    secondsLeftInEpoch: Number((currentEpoch + 1n) * EPOCH_SECONDS - now),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
 
@@ -293,19 +367,20 @@ http.createServer(async (req, res) => {
     if (req.method === "OPTIONS") return send(res, 204, {});
     if (path === "/health") return send(res, 200, {ok: true, rulesHash: RULES_HASH});
     if (path === "/identity") return send(res, 200, await getIdentity());
-    if (path === "/attest" && req.method === "POST") {
+    const post = {"/attest": attest, "/session": session}[path];
+    if (post && req.method === "POST") {
       let body = "";
       req.on("data", (d) => (body += d));
       req.on("end", async () => {
         try {
-          send(res, 200, await attest(JSON.parse(body || "{}")));
+          send(res, 200, await post(JSON.parse(body || "{}")));
         } catch (e) {
           send(res, 400, {error: e.message});
         }
       });
       return;
     }
-    send(res, 404, {error: "try /health, /identity, POST /attest"});
+    send(res, 404, {error: "try /health, /identity, POST /session, POST /attest"});
   } catch (e) {
     send(res, 500, {error: e.message});
   }

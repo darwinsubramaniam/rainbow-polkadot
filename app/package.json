@@ -1,0 +1,30 @@
+{
+  "name": "rainbow-platformer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Rainbow — a TEE-attested platformer, packaged as a Polkadot Product.",
+  "scripts": {
+    "sync-wasm": "node scripts/sync-wasm.mjs",
+    "dev": "npm run sync-wasm && vite",
+    "build": "npm run sync-wasm && tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@parity/product-sdk": "*",
+    "@parity/product-sdk-descriptors": "^0.8.0",
+    "pixi.js": "^8.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

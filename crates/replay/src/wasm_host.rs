@@ -55,8 +55,8 @@ impl WasmSim {
     /// divergence. Catching it here turns a mystery into an error message.
     fn check_rules_agree(&mut self) -> Result<()> {
         let abi = self.call0("sim_abi_version")?;
-        if abi != 1 {
-            bail!("sim.wasm ABI version {abi}, expected 1 — rebuild it");
+        if abi != 2 {
+            bail!("sim.wasm ABI version {abi}, expected 2 — rebuild it");
         }
         let max_ticks = self.call0("sim_max_ticks")?;
         if max_ticks != sim::MAX_TICKS {

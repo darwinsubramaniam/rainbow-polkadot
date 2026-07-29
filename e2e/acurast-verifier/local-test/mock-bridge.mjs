@@ -37,6 +37,13 @@ const handle = (req) => {
   }
 };
 
+// Matches verifier.mjs: a name that looks like a path is a filesystem socket
+// (the only kind macOS has), anything else is a Linux abstract socket.
+const listenPath = SOCKET.startsWith("/") || SOCKET.startsWith(".") ? SOCKET : "\0" + SOCKET;
+if (listenPath === SOCKET) {
+  try { (await import("node:fs")).unlinkSync(SOCKET); } catch {}
+}
+
 net.createServer((sock) => {
   let buf = "";
   sock.on("data", (d) => {
@@ -49,5 +56,4 @@ net.createServer((sock) => {
     }
     sock.end();
   });
-}).listen("\0" + SOCKET, () =>
-  console.log(`[mock-bridge] listening on abstract socket \\0${SOCKET}`));
+}).listen(listenPath, () => console.log(`[mock-bridge] listening on ${SOCKET}`));

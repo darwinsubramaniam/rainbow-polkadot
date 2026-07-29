@@ -5,7 +5,8 @@
 
 # Rainbow Polkadot
 
-*This is proof of concept how a Platform game can be developed and run in the Polkadot. The overall idea is to allow the player to submit the proof of score trustlessly into the the leaderboard.*
+*A proof of concept for building a platform game on Polkadot, where the player submits
+a proof of their score to the leaderboard trustlessly.*
 
 </div>
 
@@ -27,11 +28,38 @@ secure element, accepted by a PolkaVM contract on Asset Hub.
 
 | Piece | State |
 |---|---|
-| `sim` — deterministic simulation | 27 tests; identical across native / wasmi / V8 |
+| `sim` — deterministic platformer | 50 tests; identical across native / wasmi / V8 |
 | `Leaderboard` contract | deployed `0x9cc62a70…`, 34 tests |
 | Acurast verifier enclave | deployed, attesting |
 | End-to-end | verified on-chain, with negative tests |
-| The game itself | **a strawman** built to exercise determinism, not a designed game |
+| The game itself | run, jump, stomp, collect. Basic shapes; playable in a browser. |
+
+## Play it
+
+Published as a Polkadot Product: **[dw3labsgame.dev-dot.li](https://dw3labsgame.dev-dot.li)**,
+or `dw3labsgame.dot` inside the Polkadot app.
+
+Or run it locally:
+
+```bash
+cargo build -p sim-wasm --release --target wasm32-unknown-unknown
+cd app && npm install && npm run dev      # http://localhost:5173
+```
+
+Arrows to move, space to jump — *hold* it, a tap is a deliberately shorter hop.
+Press **New session** to have the enclave issue a seed, play the run, then
+**Attest & submit**. The page shows the score your browser computed next to the
+score the enclave independently recomputed from your keypresses alone. They
+should be identical — that is the whole point of the thing.
+
+Outside the Polkadot app there is no host to lend a signer, so the game and the
+attestation work but the on-chain submit does not. `web/index.html` is a
+dependency-free version of the same client, kept as a reference for the wasm
+protocol and served by `scripts/serve-game.mjs`.
+
+The level is *generated from the seed*, and the seed is derived inside the
+enclave's secure element, so you cannot see a level before you are given it, nor
+shop for an easy one: `maxSessionsPerEpoch` caps you at twelve per hour.
 
 ### Documentation
 

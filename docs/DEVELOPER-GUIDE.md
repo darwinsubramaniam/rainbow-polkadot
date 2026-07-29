@@ -77,13 +77,20 @@ sequenceDiagram
     participant E as Enclave (Acurast)
     participant L as Leaderboard (Asset Hub)
 
-    Note over P: 1. Play offline. No network, no cost.
+    Note over P,E: 1. Claim a session and get its seed
+    P->>E: POST /session {player, k}
+    E->>E: sessionId = keccak256(player, epoch, k)
+    E->>E: seed = PRF(sessionId) — derived in the secure element
+    E-->>P: {seed, epoch, k, sessionId}
+
+    Note over P: 2. Play offline. No network, no cost.
+    P->>P: sim.wasm generates the level FROM the seed
     P->>P: record inputLog = [(tick, buttons), …]
 
-    Note over P,E: 2. Ask for an attestation
+    Note over P,E: 3. Ask for an attestation
     P->>E: POST /attest {player, epoch, k, inputLog}
 
-    Note over E: 3. The enclave trusts nothing but the log
+    Note over E: 4. The enclave trusts nothing but the log
     E->>E: sessionId = keccak256(player, epoch, k)
     E->>E: seed = PRF(sessionId) — secret, in-enclave
     E->>E: replay sim.wasm → score
@@ -92,7 +99,7 @@ sequenceDiagram
 
     E-->>P: {claim, signature r‖s}
 
-    Note over P: 4. Reconstruct v (signer_sign omits it)
+    Note over P: 5. Reconstruct v (signer_sign omits it)
     P->>P: try v=27, v=28 → keep the one that recovers
 
     P->>L: submit(claim, signature)
@@ -103,6 +110,28 @@ sequenceDiagram
 **Playing is free.** Cost is paid per *claim*, not per minute played — a ten-minute run is
 ~36,000 ticks that compresses to a few kilobytes, because the log records only input
 *changes*, not frames.
+
+### Why the seed is handed out at all
+
+The level is *generated from the seed*, so the client cannot draw anything without it —
+step 1 is not optional. That is a deliberate trade, and the terms matter:
+
+**Seeds are issued for the current epoch only.** `/attest` and the contract both accept
+any epoch `<= current`, because a run played at the end of one epoch may legitimately be
+submitted during the next. Issuing *seeds* on those terms would be a different matter: a
+player could walk back through every past epoch, harvest twelve seeds from each, sample
+them all offline and play only the friendliest one. Restricting issuance to the current
+epoch is what holds the cap at `maxSessionsPerEpoch` per hour.
+
+Seeds remain unguessable either way — `deriveSeed` signs inside the secure element, so
+knowing one seed says nothing about the next. A player gets the twelve they are entitled
+to and must play each to find out what it holds.
+
+> **Known gap.** `/session` is unauthenticated: anyone may request any address's seeds and
+> learn which levels that player will face. It consumes nothing (sessions are spent
+> on-chain at `submit`, not at issuance) and any resulting score still credits the bound
+> player, so it is an information leak rather than a theft. Binding issuance to a wallet
+> signature is the obvious hardening and is **not** done here.
 
 ---
 
@@ -383,9 +412,13 @@ graph TD
    anything signed.
 3. **`rulesHash` is computed from the loaded artifact**, not configured, so the enclave
    cannot attest for a ruleset it is not running.
-4. **The seed never leaves.** `seed = keccak256(signer_sign("rainbow-seed-v1" ‖ sessionId))`.
-   `signer_sign` is deterministic (RFC 6979) and its key is in the secure element, so this
-   is a PRF the player cannot evaluate offline.
+4. **The seed cannot be computed outside.**
+   `seed = keccak256(signer_sign("rainbow-seed-v1" ‖ sessionId))`. `signer_sign` is
+   deterministic (RFC 6979) and its key is in the secure element, so this is a PRF the
+   player cannot evaluate offline. The seed *is* released by `/session` — the level is
+   generated from it, so the client cannot play without it — but only for the current
+   epoch and only for `k < maxSessionsPerEpoch`. See "Why the seed is handed out at all"
+   above.
 
 ### Deploy it
 
@@ -500,7 +533,87 @@ cast call $CONTRACT "scoreDigest((address,uint64,uint64,uint64,uint32,bytes32,ui
 
 ---
 
-## 13. Live reference
+## 13. Part 6 — the game, and shipping it as a Product
+
+The client is a **React + Vite + PixiJS v8** app in `app/`, published to the Products
+Devnet as a static bundle.
+
+### The rule the client must not break
+
+The client never implements a game rule. It steps `sim.wasm` and draws what comes back.
+A JavaScript reimplementation of the physics would be a second ruleset, it would drift,
+and honest players would start being flagged as cheats. `app/src/sim/sim.ts` is the whole
+interface: `sim_create` → `sim_step_one` → `sim_snapshot`.
+
+**React does not own the loop.** It owns the chrome; PixiJS owns the play surface and is
+driven imperatively. Reconciling a scene graph at sixty ticks a second would put a diffing
+pass inside a fixed-timestep loop that has to stay exact — the tick count *is* the clock the
+enclave replays against. React sees a 10 Hz HUD sample, never a frame.
+
+**The tick convention is load-bearing.** An input change is stamped with the number of steps
+already taken and pushed *before* stepping, matching `replay_with`. Get this off by one and
+nothing looks wrong — the game plays perfectly and only the attestation disagrees.
+
+### What the sandbox allows
+
+Everything here rests on [E0.1](E0.1-product-sandbox.md), which measured a Product's sandbox
+before any of it was built:
+
+| Capability | Result | Consequence |
+|---|---|---|
+| `WebAssembly.instantiate` | PASS | `sim.wasm` runs client-side — no fallback existed if it had not |
+| Third-party HTTPS fetch | PASS | the app calls the enclave tunnel directly; no relay needed |
+| WebGL2 | PASS | PixiJS v8 is viable |
+| `SharedArrayBuffer` | absent | rules out threaded engine targets; PixiJS does not need it |
+
+The renderer therefore requests `preference: "webgl"` explicitly rather than letting PixiJS
+prefer WebGPU, which was never measured in the sandbox.
+
+### Detecting the host
+
+A Product gets its signer and chain RPC from the host. Outside one, `ProductSDKProvider`
+throws `Host storage unavailable` — and since it sits above the whole tree, that takes the
+game down with it.
+
+`app/src/SdkGate.tsx` asks **`isInsideContainer()`** from `@parity/product-sdk/host`, then
+mounts the provider only when there is a host, with an error boundary behind it.
+
+> **Do not infer the host from the frame.** An earlier version used
+> `window.self !== window.top`, reasoning that a Product is delivered into a cross-origin
+> iframe — which E0.1 did measure, but only on the *web gateway*. **Polkadot Desktop loads
+> the app top-level**, so that check reported "no host" inside a real host and silently
+> disabled submitting, with no error to explain it.
+
+Without a host the app still plays and still gets scores attested; only the on-chain submit
+is unavailable. A `DevProvider` fallback supplies dev accounts so `npm run dev` is useful.
+
+### Publishing
+
+```bash
+cd app
+npm run build                     # sync-wasm → tsc → vite build, emits dist/
+pad ./dist <name>.dot --env devnet --mnemonic "$MNEMONIC"
+```
+
+> **`pad` ignores the `MNEMONIC` environment variable** despite its own `--help` offering it.
+> It falls back to a dev worker account and then fails with
+> `Domain <name>.dot is already owned by 0x…`, which reads like an ownership problem and is
+> really a signing-identity one. Pass `--mnemonic` explicitly.
+
+> **The gateway serves a resolver shell, so `curl` cannot verify a deploy.** Both `/` and
+> `/sim.wasm` return the same ~20 KB HTML; resolution happens client-side through a
+> service-worker VFS into a sandboxed iframe. Open it in a browser to check.
+
+**Bundle size is a quota, not a fee.** Bulletin storage is authorization-based — this
+deployment's account holds 20 MB. The SDK reaches every supported chain through dynamic
+imports, so Rollup emitted metadata for Kusama, Polkadot, Paseo and Individuality too:
+6 MB of the 7.1 MB build, for chains the app never connects to. `vite.config.ts` stubs the
+unused ones, taking the bundle to **3.1 MB** — the difference between two deploys and six.
+Check the quota with `dotns bulletin status <ss58> --env devnet`.
+
+---
+
+## 14. Live reference
 
 | | |
 |---|---|
@@ -511,12 +624,20 @@ cast call $CONTRACT "scoreDigest((address,uint64,uint64,uint64,uint32,bytes32,ui
 | Substrate RPC (writes) | `wss://asset-hub-paseo-rpc.n.dwellir.com` |
 | Owner | `0x50AFf5a51BE03d5914D9b5A42c548Dc35A73f7D8` |
 | `epochSeconds` / `maxSessionsPerEpoch` | 3600 / 12 |
-| Game 1 `rulesHash` | `0x229be8b7…bd479c` = `keccak256(sim.wasm)` |
-| `sim.wasm` | 22,820 bytes, `sha256 c56a68b3…e0b5` |
+| Game 1 `rulesHash` | `0x229be8b7…bd479c` — retired: the falling-orb strawman |
+| Game 2 `rulesHash` | `0x02bdb80f…bd049b` = `keccak256(sim.wasm)` — the platformer |
+| `sim.wasm` (game 2) | 33,599 bytes, ABI version 2 |
+| Product app | `dw3labsgame.dot` — https://dw3labsgame.dev-dot.li |
+| App bundle CID | `bafybeihq4votaqskcndngna3hvnwrwg3eazk7v4qxdbrerpxqpx4xkjnhy` |
+
+> **A new ruleset is a new `gameId`, never a mutated hash.** `gameRules` is write-once by
+> design (defect D3): scores earned under one set of physics must not share a board with
+> scores earned under another. Game 1's board still exists and is still valid; it is simply
+> closed. The contract did **not** need redeploying for this.
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 | Symptom | Cause |
 |---|---|
@@ -529,11 +650,36 @@ cast call $CONTRACT "scoreDigest((address,uint64,uint64,uint64,uint32,bytes32,ui
 | Acurast job dies silently | DevTools is **mainnet-only** — a canary job has no stdout. Instrument with a webhook. |
 | `apt` exits 100 in the proot | `TMPDIR` leak — `export TMPDIR=/tmp` first |
 | `cp X X failed` in the job | the bundle extracts to `/root/app`, which **is** `$HOME/app` |
+| `rulesHash` changed after a comment-only edit | `overflow-checks = true` bakes panic `file:line:col` into the binary, so **adding a comment to `crates/sim` shifts line numbers and changes the artifact**. See below. |
+
+### Editing `crates/sim` after a game is registered
+
+`rulesHash` is `keccak256(sim.wasm)`, and the release profile sets `overflow-checks = true`.
+Overflow checks emit panic metadata carrying the **source line and column**, so the compiled
+bytes depend on the *layout* of the source, not just its behaviour. A reformatting, a new
+comment, or a clippy autofix such as `tx < 10 || tx >= N` → `!(10..N).contains(&tx)` all
+change the artifact — one of those was measured moving it by a single byte, another kept the
+length identical and changed the contents.
+
+Once a `gameId` is registered this is no longer cosmetic: the source must keep reproducing
+the exact artifact the enclave bundles and the contract is pinned to. Verify before
+committing any change to that crate:
+
+```bash
+cargo build -p sim-wasm --release --target wasm32-unknown-unknown
+node -e 'const{keccak_256}=require("./scripts/node_modules/@noble/hashes/sha3.js");
+  console.log("0x"+Buffer.from(keccak_256(
+    require("fs").readFileSync("target/wasm32-unknown-unknown/release/sim_wasm.wasm"))).toString("hex"))'
+# must equal gameRules(2) on-chain
+```
+
+If a change to the rules is genuinely wanted, it is a **new `gameId`**, not a new hash for
+the old one.
 | Revert `0x36177dda` / `0xdafa9c74` / `0x342bd384` | `SessionAlreadyUsed` / `NotAnImprovement` / `BadAttestation` |
 
 ---
 
-## 15. What this does **not** solve
+## 16. What this does **not** solve
 
 Stated plainly, because a security design that overclaims is worse than one that admits its
 edges.
@@ -556,7 +702,7 @@ denominator matters; those need enclave-submitted results rather than player-rel
 
 ---
 
-## 16. The strongest thing still unbuilt
+## 17. The strongest thing still unbuilt
 
 Publish the **input log to Bulletin** alongside each score.
 
