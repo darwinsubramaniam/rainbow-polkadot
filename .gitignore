@@ -15,3 +15,11 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Foundry — libs are vendored by `forge install` (902 files / 14MB); pinned
+# versions live in contracts/README.md so builds stay reproducible without
+# committing them.
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/

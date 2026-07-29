@@ -1,0 +1,24 @@
+[profile.default]
+src = "src"
+test = "test"
+libs = ["lib"]
+out = "out"
+
+# Pinned to match Goal.md and to stay inside what `resolc` supports when this is
+# compiled to PolkaVM for Asset Hub. Bump deliberately, not incidentally — the
+# EIP-712 domain separator does not depend on the compiler, but the deployed
+# bytecode (and therefore the verifying contract address) does.
+solc = "0.8.28"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+
+remappings = [
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "forge-std/=lib/forge-std/src/",
+]
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
