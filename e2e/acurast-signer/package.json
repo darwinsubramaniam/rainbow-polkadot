@@ -1,0 +1,13 @@
+{
+  "name": "e0-signer-verify",
+  "private": true,
+  "type": "module",
+  "description": "E0.3 — determines empirically what Acurast's signer_sign does with its input, so the leaderboard contract's digest construction is based on measurement rather than assumption.",
+  "scripts": {
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1"
+  }
+}

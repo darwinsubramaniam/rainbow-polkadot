@@ -2,3 +2,9 @@
 
 # Acurast CLI scratch (logs + staged deploy bundles)
 .acurast/
+
+# Secrets — never commit. See e2e/acurast-signer/.env.example
+.env
+**/.env
+
+node_modules/
