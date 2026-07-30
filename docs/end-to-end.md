@@ -93,7 +93,12 @@ should not be mistaken for a played score.
 
 ```bash
 export PATH="$HOME/.foundry-polkadot/bin:$PATH"
-cd e2e/acurast-verifier && acurast deploy rainbow-verifier   # note the tunnel URL
+
+# Exercise the entrypoint locally first — ~40s, and it starts from an image with
+# no curl and no node, which is the part that keeps failing on the phone.
+cd e2e/acurast-verifier/local-test && ./run.sh --smoke
+
+cd .. && acurast deploy rainbow-verifier   # hostname is fixed; see .env
 
 # register the deployment's key, read from Acurast chain state
 node scripts/revive-call.mjs --to $CONTRACT \

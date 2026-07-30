@@ -142,9 +142,30 @@ node scripts/revive-call.mjs --to $A \
   --data "$(cast calldata 'setVerifier(address,bool)' 0xVERIFIER true)"
 ```
 
-## Next
+## Verifier registered (2026-07-30)
 
-Register the Acurast deployment's `secp256k1` address as verifier. It is published on-chain
-in the assignment before the job runs (see [E0.3](E0.3-E0.4-acurast.md)), so it can be read
-from Acurast chain state rather than taken on trust. Note it is **per deployment** — every
-redeploy mints a new address unless `reuseKeysFrom` is used, so add without removing.
+The contract no longer fails closed. Acurast deployment `380403`'s key is registered:
+
+| | |
+|---|---|
+| Verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` |
+| secp256k1 | `032cd907b739b8c108050efa4132f59a2c40241db1aef1a1dd3f3b861321e418e9` |
+| Serving at | `https://rainbow-verifier.dw3labs.work` |
+| Registered in | block `#11590096` |
+
+The address was read from the **on-chain assignment** before the job ran, not from the
+enclave's own claim, and the public hostname was then confirmed to serve that same key —
+so the entry is derivable from chain state rather than trusted (see
+[E0.3/E0.4](E0.3-E0.4-acurast.md)).
+
+It is **per deployment**: every redeploy mints a new address, and since `acurast.json` now
+sets `mutability: "Immutable"`, `reuseKeysFrom` is not available to avoid that. Add without
+removing, so an in-flight attestation from a previous job is not invalidated mid-round.
+
+```bash
+node scripts/revive-call.mjs --to $CONTRACT \
+  --data "$(cast calldata 'setVerifier(address,bool)' $ENCLAVE_ADDR true)" --dry-run
+```
+
+Dry-run first — it catches an owner mismatch or a reverting call for free, before spending
+the fee (this one estimated 83705808 plancks).
