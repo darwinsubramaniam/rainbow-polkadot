@@ -36,8 +36,31 @@ const write = (key: string, value: string) => {
   }
 };
 
-export function useStoredString(key: string, fallback = ""): [string, (value: string) => void] {
-  const [value, setValue] = useState(() => read(key) ?? fallback);
+/**
+ * `migrate` rewrites a value that was stored by an *earlier build* of the app,
+ * before the first render sees it. A stored preference always beats a new
+ * default — that is the point of persisting it — so a default that changes
+ * meaning between builds cannot reach anyone who has already set one, and they
+ * are stuck on a value the app no longer considers reachable.
+ *
+ * It must be conservative and idempotent: return `stored` unchanged unless the
+ * value is one this build can show is obsolete. It runs on every mount, and
+ * React re-runs the initialiser under StrictMode, so it must not depend on
+ * running exactly once. The rewrite is written back so storage converges rather
+ * than being re-migrated forever.
+ */
+export function useStoredString(
+  key: string,
+  fallback = "",
+  migrate?: (stored: string) => string,
+): [string, (value: string) => void] {
+  const [value, setValue] = useState(() => {
+    const stored = read(key);
+    if (stored === null) return fallback;
+    const next = migrate?.(stored) ?? stored;
+    if (next !== stored) write(key, next);
+    return next;
+  });
 
   const set = useCallback(
     (next: string) => {

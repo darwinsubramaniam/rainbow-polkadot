@@ -26,19 +26,50 @@ import { standaloneReason } from "./main";
  * Baked in only as a convenience default, and always overridable in the UI —
  * the value the user types wins and is persisted locally.
  *
- * `VITE_VERIFIER_URL` is the one to set. Deployed behind a *named* Cloudflare
- * tunnel (`CF_TUNNEL_TOKEN` in `e2e/acurast-verifier/.env`), the hostname lives
- * in Cloudflare rather than in the job, so it stays correct across restarts and
- * across processors and a build-time constant is finally worth having.
+ * `VITE_VERIFIER_URL` overrides it at build time. The literal below is the
+ * named-tunnel hostname from `VERIFIER_HOSTNAME` in `e2e/acurast-verifier/.env`:
+ * because the phone attaches as a connector to a tunnel *we* own, the hostname
+ * lives in Cloudflare rather than in the job, and survives a restart or a
+ * reassignment to a different processor. That is what makes a baked-in constant
+ * worth having — the previous fallback was a quick-tunnel hostname minted at
+ * boot, which went stale the moment its job ended.
  *
- * The literal below is the older fallback: an Acurast job with no tunnel token
- * gets an unauthenticated quick tunnel whose hostname is minted at boot and
- * dies with the job, so this string is stale the moment that job ends and the
- * URL has to be pasted in by hand.
+ * Note this pins a *hostname*, not a key. Every deployment mints its own
+ * secp256k1 key, so the address behind this URL rotates on each redeploy and
+ * must be registered with `setVerifier` before attestations from it are
+ * accepted. The URL being stable is what stops the *hostname* churning; it says
+ * nothing about which signer is currently on the other end.
  */
 const DEFAULT_VERIFIER =
-  import.meta.env.VITE_VERIFIER_URL ||
-  "https://buck-influence-greetings-nursery.trycloudflare.com";
+  import.meta.env.VITE_VERIFIER_URL || "https://rainbow-verifier.dw3labs.work";
+
+/**
+ * Retire a stored quick-tunnel URL left over from before the named tunnel.
+ *
+ * A `*.trycloudflare.com` hostname is minted at boot by an unauthenticated
+ * tunnel and dies with the job that minted it, so a stored one is dead *by
+ * construction* — it cannot be a verifier anyone is deliberately pointing at,
+ * only a leftover from a job that has since ended. Those we replace.
+ *
+ * Everything else is left exactly as stored, because a stored value normally
+ * means someone typed it: a verifier on localhost, a second deployment on its
+ * own tunnel, a colleague's phone. Migrating on "differs from the default"
+ * would silently overwrite all of those, which is why the test is the dead
+ * hostname rather than the mismatch.
+ *
+ * Parsed rather than pattern-matched: `endsWith` on the raw string would also
+ * catch `https://evil.example/?x=.trycloudflare.com`, and anything unparseable
+ * is left alone rather than guessed at.
+ */
+const retireQuickTunnel = (stored: string): string => {
+  let host: string;
+  try {
+    host = new URL(stored).hostname;
+  } catch {
+    return stored;
+  }
+  return host.endsWith(".trycloudflare.com") ? DEFAULT_VERIFIER : stored;
+};
 
 /** Only the parts of a session the UI and the attestation actually need. */
 interface Active {
@@ -87,7 +118,11 @@ export function Play() {
   // The URL persists as it is edited, so a reload does not cost the user a
   // pasted tunnel hostname. There was previously a separate uncommitted draft,
   // which meant a URL typed but never submitted was simply lost.
-  const [verifier, setVerifier] = useStoredString("rainbow.verifier", DEFAULT_VERIFIER);
+  const [verifier, setVerifier] = useStoredString(
+    "rainbow.verifier",
+    DEFAULT_VERIFIER,
+    retireQuickTunnel,
+  );
 
   // Dev only: an enclave that answers from this tab instead of a deployed job.
   // Persisted so a reload does not silently put the app back on a tunnel that
