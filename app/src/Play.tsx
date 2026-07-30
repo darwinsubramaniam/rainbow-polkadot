@@ -615,7 +615,7 @@ export function Play() {
                     value={verifier}
                     spellCheck={false}
                     disabled={simulating}
-                    placeholder="https://<tunnel>.trycloudflare.com"
+                    placeholder="https://verifier.example.com"
                     onChange={(e) => setVerifier(e.target.value)}
                   />
                   {simulating && <span className="hint">unused while the simulator is on</span>}

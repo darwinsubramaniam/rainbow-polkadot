@@ -813,7 +813,9 @@ Check the quota with `dotns bulletin status <ss58> --env devnet`.
 | Game 2 `rulesHash` | `0x02bdb80f…bd049b` = `keccak256(sim.wasm)` — the platformer |
 | `sim.wasm` (game 2) | 33,599 bytes, ABI version 2 |
 | Product app | `dw3labsgame.dot` — https://dw3labsgame.dev-dot.li |
-| App bundle CID | `bafybeihq4votaqskcndngna3hvnwrwg3eazk7v4qxdbrerpxqpx4xkjnhy` |
+| App bundle CID | `bafybeigiuyyktl7jyvhtkywkyrgxjp6zmg264uubjwfcyedmmayrdsk4em` (2026-07-30) |
+| Verifier | `https://rainbow-verifier.dw3labs.work` — baked in as the default |
+| Registered verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (Acurast `380403`) |
 
 > **A new ruleset is a new `gameId`, never a mutated hash.** `gameRules` is write-once by
 > design (defect D3): scores earned under one set of physics must not share a board with
