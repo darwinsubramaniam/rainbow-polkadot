@@ -180,28 +180,111 @@ then
   chmod +x /tmp/cloudflared
   note "tunnel" "cloudflared $(/tmp/cloudflared --version 2>&1 | head -1)"
 
-  # GOTCHA 6: flag order. `--no-autoupdate` after `run` dumps help and exits 1.
-  # A quick tunnel needs no token, no account and no DNS.
-  /tmp/cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" \
-    >/tmp/cf.log 2>&1 &
-  TUNNEL_PID=$!
+  # GOTCHA 6: flag order. `--no-autoupdate` is a `tunnel` flag; placed after
+  # `run` cloudflared dumps its help text and exits 1.
+  if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
+    # Named tunnel. The public hostname is configured once in the Zero Trust
+    # dashboard and routed to http://localhost:$PORT *as resolved on whichever
+    # connector is currently attached* — so the URL survives this job ending,
+    # restarting, or being reassigned to a different phone. That is the point:
+    # the app stops needing to be told a fresh hostname every run.
+    #
+    # The token is base64 JSON {"a":account,"t":tunnelId,"s":secret}, delivered
+    # encrypted via includeEnvironmentVariables. Never echo it into the log.
+    /tmp/cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" \
+      >/tmp/cf.log 2>&1 &
+    TUNNEL_PID=$!
+    sleep 8
 
-  TUNNEL_URL=""
-  i=0
-  while [ $i -lt 40 ]; do
-    TUNNEL_URL="$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cf.log 2>/dev/null | head -1)"
-    [ -n "$TUNNEL_URL" ] && break
-    i=$((i + 1))
-    sleep 3
-  done
-
-  if [ -n "$TUNNEL_URL" ]; then
-    note "tunnel" "READY $TUNNEL_URL"
+    if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+      TUNNEL_URL=""
+      fail "tunnel" "cloudflared exited: $(tail -20 /tmp/cf.log 2>/dev/null | esc)"
+    elif [ -n "${VERIFIER_HOSTNAME:-}" ]; then
+      TUNNEL_URL="https://$VERIFIER_HOSTNAME"
+      note "tunnel" "READY $TUNNEL_URL (named)"
+    else
+      # The connector is up and the dashboard's hostname is already serving it;
+      # we just have no way to name it in this report.
+      TUNNEL_URL=""
+      note "tunnel" "connector up, but VERIFIER_HOSTNAME is unset — set it to have the URL reported here"
+    fi
   else
-    fail "tunnel" "no hostname; cf.log: $(tail -20 /tmp/cf.log 2>/dev/null | esc)"
+    # Fallback: unauthenticated quick tunnel. No account, no DNS, no token —
+    # but the hostname is minted at boot and dies with the job, so someone has
+    # to read it out of this webhook and paste it into the app.
+    /tmp/cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" \
+      >/tmp/cf.log 2>&1 &
+    TUNNEL_PID=$!
+
+    TUNNEL_URL=""
+    i=0
+    while [ $i -lt 40 ]; do
+      TUNNEL_URL="$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cf.log 2>/dev/null | head -1)"
+      [ -n "$TUNNEL_URL" ] && break
+      i=$((i + 1))
+      sleep 3
+    done
+
+    if [ -n "$TUNNEL_URL" ]; then
+      note "tunnel" "READY $TUNNEL_URL (quick — per-run hostname)"
+    else
+      fail "tunnel" "no hostname; cf.log: $(tail -20 /tmp/cf.log 2>/dev/null | esc)"
+    fi
   fi
 else
   fail "tunnel" "cloudflared download failed"
+fi
+
+# --- sole-connector check -------------------------------------------------
+# A named tunnel accepts any number of connectors and load-balances across
+# them. For a stateless website that is free redundancy; here it is a
+# correctness bug. Every deployment mints its own secp256k1 key, so a connector
+# left behind by a previous job answers some fraction of requests with a signer
+# the client never pinned — and the attestation is then rejected on-chain with
+# nothing in either log to say which half of the round trip was wrong.
+#
+# So ask the public hostname who it is, and compare with the local process.
+# Same key => we are the only connector. Different => withdraw, rather than
+# serve half the traffic under an identity that is not ours.
+key_of() { # base-url -> secp256k1 hex, or empty
+  curl -m 20 -s "$1/identity" 2>/dev/null | node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try { process.stdout.write(String(JSON.parse(s).secp256k1 ?? "")); } catch {}
+    });' 2>/dev/null
+}
+
+if [ -n "${CF_TUNNEL_TOKEN:-}" ] && [ -n "${TUNNEL_URL:-}" ]; then
+  LOCAL_KEY="$(key_of "http://127.0.0.1:$PORT")"
+
+  if [ -z "$LOCAL_KEY" ]; then
+    # No local key means nothing to compare against — and an empty string would
+    # differ from a perfectly healthy edge answer and tear down our own tunnel.
+    # Skip the check rather than act on a comparison that cannot be trusted.
+    note "tunnel" "WARN local /identity returned no signer — skipping the single-connector check"
+  else
+    EDGE_KEY=""
+    i=0
+    while [ $i -lt 6 ]; do
+      EDGE_KEY="$(key_of "$TUNNEL_URL")"
+      [ -n "$EDGE_KEY" ] && break
+      i=$((i + 1))
+      sleep 5
+    done
+
+    if [ -z "$EDGE_KEY" ]; then
+      # Not fatal, and retrying further will not help: on first setup this is
+      # almost always the public hostname route or the CNAME missing in the
+      # dashboard, which is fixed there, not here.
+      note "tunnel" "WARN $TUNNEL_URL did not answer /identity — check the public hostname route and the CNAME to <tunnel-id>.cfargotunnel.com"
+    elif [ "$EDGE_KEY" != "$LOCAL_KEY" ]; then
+      fail "tunnel" "another connector already serves $TUNNEL_URL (edge signer $EDGE_KEY, ours $LOCAL_KEY) — withdrawing to keep the hostname single-signer"
+      kill "$TUNNEL_PID" 2>/dev/null
+      exit 1
+    else
+      note "tunnel" "sole connector on $TUNNEL_URL (signer $LOCAL_KEY)"
+    fi
+  fi
 fi
 
 # --- stay alive for the scheduled window ---------------------------------

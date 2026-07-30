@@ -24,13 +24,21 @@ import { standaloneReason } from "./main";
  * Verifier the app points at out of the box.
  *
  * Baked in only as a convenience default, and always overridable in the UI —
- * the value the user types wins and is persisted locally. It has to work this
- * way because an Acurast job is a *onetime* execution behind a quick tunnel: the
- * hostname is minted at boot and dies with the job, so no build-time constant
- * can stay correct for long. When the enclave is redeployed, either paste the
- * new URL here or republish with this updated.
+ * the value the user types wins and is persisted locally.
+ *
+ * `VITE_VERIFIER_URL` is the one to set. Deployed behind a *named* Cloudflare
+ * tunnel (`CF_TUNNEL_TOKEN` in `e2e/acurast-verifier/.env`), the hostname lives
+ * in Cloudflare rather than in the job, so it stays correct across restarts and
+ * across processors and a build-time constant is finally worth having.
+ *
+ * The literal below is the older fallback: an Acurast job with no tunnel token
+ * gets an unauthenticated quick tunnel whose hostname is minted at boot and
+ * dies with the job, so this string is stale the moment that job ends and the
+ * URL has to be pasted in by hand.
  */
-const DEFAULT_VERIFIER = "https://buck-influence-greetings-nursery.trycloudflare.com";
+const DEFAULT_VERIFIER =
+  import.meta.env.VITE_VERIFIER_URL ||
+  "https://buck-influence-greetings-nursery.trycloudflare.com";
 
 /** Only the parts of a session the UI and the attestation actually need. */
 interface Active {

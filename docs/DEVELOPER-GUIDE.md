@@ -193,9 +193,164 @@ sit on the same board as scores earned under new ones, silently incomparable.
 
 ---
 
-## 6. Setup
+## 6. Why the player can safely relay their own score
 
-### 6.1 Toolchain
+The browser receives the enclave's attestation and sends the `submit` transaction **itself**.
+No relay server, no allowlisted sender — `Leaderboard.submit` is `external` and callable by
+anyone, with anything.
+
+That looks like the hole in the design. It is not, and the reason is worth being precise
+about, because "the player carries the proof" is exactly the property that makes the system
+gasless-capable, censorship-resistant and cheap to run.
+
+### The claim *is* the signed object
+
+The mistake to avoid is picturing the signature as a stamp of approval sitting *next to* a
+score. It is not next to anything. The enclave signs the **entire `ScoreClaim` struct**, and
+the contract never reads the claim and then separately checks a signature. It **recomputes
+the digest from the calldata it was handed** and asks who signed *that*.
+
+```mermaid
+flowchart TB
+    F["ScoreClaim — every field is hashed<br/>player · gameId · score · epoch · k · rulesHash · expiry"]
+    D["EIP-712 domain — binds the deployment<br/>name RainbowLeaderboard · version 1 · chainId · verifyingContract"]
+
+    F --> SH["structHash = keccak256(SCORE_TYPEHASH ‖ fields)"]
+    D --> DS["domainSeparator = keccak256(domain)"]
+    SH --> DG["digest = keccak256(0x19 0x01 ‖ domainSeparator ‖ structHash)"]
+    DS --> DG
+
+    SIG["signature r‖s‖v<br/>made inside the secure element"] --> R
+    DG --> R["ECDSA.tryRecover(digest, signature)"]
+    R --> A["recovered address"]
+    A --> Q{"in the isVerifier set?"}
+    Q -->|yes| OK["consume session · store best · emit NewBest"]
+    Q -->|no| BAD["revert BadAttestation"]
+
+    style OK fill:#1f3a24,stroke:#0a7d33,color:#fff
+    style BAD fill:#3a1f1f,stroke:#b3261e,color:#fff
+    style F fill:#1f2c3a,stroke:#1565c0,color:#fff
+    style D fill:#1f2c3a,stroke:#1565c0,color:#fff
+```
+
+The consequence: **there is no field the player can edit that the digest does not cover.**
+Every value the contract acts on — who is credited, how much, which game, which session,
+which ruleset, until when — is inside the hash. And the domain separator puts the `chainId`
+and this contract's own address in there too, so an attestation is not even portable to a
+second deployment of the same code.
+
+### What happens when the player changes the claim
+
+Concretely. The enclave attested `score = 1200`. The player edits the calldata to `999999`
+in the browser before signing the transaction.
+
+```mermaid
+flowchart LR
+    subgraph H["HONEST — claim exactly as attested"]
+        direction TB
+        H1["score = 1200"] --> H2["digest 0x7f3a…c81d"]
+        H2 --> H3["recovers to 0xVERIFIER…"]
+        H3 --> H4["isVerifier ✓<br/>NewBest emitted"]
+    end
+
+    subgraph T["TAMPERED — score edited client-side"]
+        direction TB
+        T1["score = 999999"] --> T2["digest 0x0b94…22ef<br/>an unrelated 32 bytes"]
+        T2 --> T3["recovers to 0x1c7d…<br/>an unrelated address"]
+        T3 --> T4["isVerifier ✗<br/>revert BadAttestation"]
+    end
+
+    style H fill:#1f3a24,stroke:#0a7d33,color:#fff
+    style T fill:#3a1f1f,stroke:#b3261e,color:#fff
+```
+
+*(Digests illustrative.)* Note what is **not** happening: nothing "detects the tampering."
+The contract has no idea a value was changed and holds no notion of an original to compare
+against. It hashes what it was given and recovers who signed that hash. One flipped bit
+anywhere in the claim changes the digest completely, and the recovered address becomes an
+unrelated 20-byte value that nobody ever added to `isVerifier`.
+
+**Why the attacker cannot steer the recovery.** `ecrecover` does not fail on a "wrong"
+signature — it cheerfully returns *some* address for almost any `(digest, signature)` pair.
+That is precisely why the check is an **allowlist**, not a validity test. To make recovery
+land on a registered verifier the attacker would need a signature valid under the verifier's
+key over a digest of their choosing. That is forging secp256k1, not editing a transaction.
+
+### Every tamper, and where it dies
+
+| What the player changes | What the contract does | Covered by |
+|---|---|---|
+| Raises `score` | digest changes → recovers to a non-verifier → `BadAttestation` | `test_rejectsATamperedScore` |
+| Swaps `player` for their own address | same — `player` is inside the hash → `BadAttestation` | `test_rejectsSwappingThePlayer` |
+| Extends `expiry` past the enclave's TTL | digest changes → `BadAttestation` | `test_rejectsExtendingExpiry` |
+| Alters `epoch` or `k` to mint a fresh session slot | digest changes → `BadAttestation`. `sessionId` is *derived* from `(player, epoch, k)` and never submitted, so there is no session field to desynchronise | `testFuzz_sessionIdIsInjective` proves the derivation is injective; the revert follows from the digest |
+| Points `gameId` at another board, keeping `rulesHash` | `RulesMismatch`, on the cheap check, before recovery even runs | `test_rejectsAMismatchedRulesHash` |
+| Changes `gameId` **and** `rulesHash` together | structurally valid, so it survives the cheap checks and *does* reach recovery — then `BadAttestation`. Only the enclave can mint a valid claim for another board | `test_rejectsRedirectingToAnotherGame` |
+| Re-signs the edited claim with their own wallet key | recovers perfectly — to *their* address, which is not a verifier → `BadAttestation` | `test_rejectsASignatureFromANonVerifier` |
+| Sends a garbage signature | `ECDSA.tryRecover` returns an error, never a garbage address → `BadAttestation` | `test_rejectsGarbageSignature` |
+| Malleates the signature to `(r, n−s)` | OpenZeppelin rejects high-`s` → `BadAttestation`. Harmless even without that guard: replay is keyed on `sessionId`, not on the signature bytes | `test_rejectsAMalleableSignature` |
+| Picks the wrong recovery id `v` | recovers to a different address entirely → `BadAttestation` | `test_theWrongRecoveryIdIsRejected` |
+| Submits the same untouched attestation twice | first lands, second hits `SessionAlreadyUsed` | `test_rejectsAReplayedSession` |
+| Replays an old, lower attestation to overwrite a higher best | `NotAnImprovement` — `best` only ever moves up | `testFuzz_onlyImprovementsEverLand` |
+| Submits to a different leaderboard deployment or chain | the domain separator binds `verifyingContract` and `chainId`, so the digest computed there differs → `BadAttestation` | `test_digestIsBoundToThisContractAndChain` |
+
+Every row ends in a revert. The attacker pays gas and changes nothing. Run them with
+`forge test` in `contracts/`.
+
+> **When writing new tamper tests, watch the check ordering** (§5). Aim at a **fresh**
+> session — a tamper test pointed at an already-spent one returns `SessionAlreadyUsed` and
+> never reaches the signature check, so it proves nothing. This bit us once already; see
+> `docs/end-to-end.md`.
+
+### Why `msg.sender` is deliberately unconstrained
+
+Credit goes to `claim.player`, which is inside the signature. `msg.sender` is not checked
+**at all**.
+
+`Goal.md` originally bound `msg.sender` instead, to stop a third party from submitting
+someone else's attestation and being credited for it. Naming `player` explicitly defeats that
+attack *directly*, and does it without constraining who pays for the transaction. Leaving the
+sender free then buys two real things:
+
+- **Gasless play is a drop-in.** A relayer with a hot key can call `submit` on a player's
+  behalf today — no meta-transaction scheme, no contract change, no new trust assumption.
+- **The player is never locked out by infrastructure.** They hold a valid signed claim for
+  the full TTL. If the tunnel, the relayer or the processor dies *after* attestation, the
+  score can still be landed by anyone, from anywhere.
+
+A hostile relayer can **delay** a submission or **censor** it by refusing to send. It cannot
+alter the score, redirect the credit, or manufacture an attestation. Front-running someone
+else's attestation is not an attack either — it lands the score for its rightful owner and
+pays their gas. That is covered by `test_anyoneMayRelay_scoreCreditsThePlayer`.
+
+> **Why the enclave does not submit the transaction itself.**
+> A tempting variant is to have the player pay the processor and let the processor send the
+> transaction. It buys **no integrity**: it changes *who the sender is*, a value the contract
+> deliberately ignores, so it closes none of the rows in the table above. What it adds is
+> real — a funded key custodied on a phone whose deployment rotates, nonce management on a
+> single-threaded job, an escrow protocol with refunds for the `NotAnImprovement` reverts
+> that will be routine, and a hard liveness dependency where today the player holds a
+> self-serve proof.
+>
+> The one thing it *would* change is the denominator problem — an enclave that submits every
+> result makes withheld runs impossible. That does not apply to a **highest score** board;
+> see the cherry-picking note in §17.
+>
+> The split as built is the right one: the **enclave is the authority on truth**, the
+> **chain is the authority on state**, and the **transport between them is untrusted by
+> construction**.
+
+### Where the real risk actually sits
+
+Relaying is sound. The residual risk is not in *who carries* the attestation but in *what the
+enclave is willing to attest to* — it replays a log rather than witnessing a performance, and
+a perfectly executed input log is a valid input log. See §17.
+
+---
+
+## 7. Setup
+
+### 7.1 Toolchain
 
 ```bash
 node --version      # 22+ required by pad/cdm
@@ -224,7 +379,7 @@ cdm setup           # installs the Rust/PVM toolchain; npm does NOT
 > export PATH="$HOME/.foundry-polkadot/bin:$PATH"
 > ```
 
-### 6.2 Accounts
+### 7.2 Accounts
 
 You need **three** distinct things funded/authorised, and they trip people up because they
 are separate:
@@ -242,11 +397,11 @@ graph TD
 
 > **A mapped H160 has no private key.** It is derived from your Substrate account. So
 > `cast send --mnemonic` will *not* work for owner-only calls on a `cdm`-deployed contract —
-> cast derives an Ethereum BIP44 key and signs as a completely different address. See §9.
+> cast derives an Ethereum BIP44 key and signs as a completely different address. See §10.
 
 ---
 
-## 7. Part 1 — the simulation
+## 8. Part 1 — the simulation
 
 The whole guarantee rests on the sim replaying **identically** everywhere. If the browser and
 the enclave disagree by one point, an honest player is flagged as a cheat with no error
@@ -281,9 +436,9 @@ Rules that make this work, enforced structurally rather than by convention:
 
 ---
 
-## 8. Part 2 — the contract
+## 9. Part 2 — the contract
 
-### 8.1 Test
+### 9.1 Test
 
 ```bash
 cd contracts
@@ -292,7 +447,7 @@ forge install foundry-rs/forge-std@v1.11.0 --no-git
 forge test          # 34 tests, every reject path
 ```
 
-### 8.2 Deploy
+### 9.2 Deploy
 
 ```mermaid
 graph LR
@@ -335,7 +490,7 @@ cdm deploy -n devnet --bulletin-url wss://bulletin-paseo-02.tservices.es:9443
 > different `--bulletin-url`. Note the contract deploys *before* metadata, so a timeout can
 > orphan a deployed-but-unregistered contract.
 
-### 8.3 Configure
+### 9.3 Configure
 
 `rulesHash` is the hash of the simulation binary itself:
 
@@ -351,7 +506,7 @@ node scripts/revive-call.mjs --to $CONTRACT \
 
 ---
 
-## 9. Owner calls — the part that surprises everyone
+## 10. Owner calls — the part that surprises everyone
 
 ```mermaid
 flowchart TD
@@ -383,7 +538,7 @@ node scripts/revive-call.mjs --to $CONTRACT \
 
 ---
 
-## 10. Part 3 — the verifier enclave
+## 11. Part 3 — the verifier enclave
 
 The verifier is a small Node job that bundles `sim.wasm` and a vendored keccak256 — 52 KB
 total, comfortably under the ~1 MB IPFS ceiling for an Acurast bundle.
@@ -457,7 +612,7 @@ Key config, and why:
 
 ---
 
-## 11. Part 4 — wiring them together
+## 12. Part 4 — wiring them together
 
 This is the step that makes the trust story real.
 
@@ -493,7 +648,7 @@ node scripts/attest-and-submit.mjs \
 
 ---
 
-## 12. Part 5 — the signature detail that will cost you a day
+## 13. Part 5 — the signature detail that will cost you a day
 
 Acurast's `signer_sign` returns **64 bytes** (`r‖s`) with **no recovery id**.
 `ECDSA.recover` needs **65** with `v ∈ {27, 28}`.
@@ -533,7 +688,7 @@ cast call $CONTRACT "scoreDigest((address,uint64,uint64,uint64,uint32,bytes32,ui
 
 ---
 
-## 13. Part 6 — the game, and shipping it as a Product
+## 14. Part 6 — the game, and shipping it as a Product
 
 The client is a **React + Vite + PixiJS v8** app in `app/`, published to the Products
 Devnet as a static bundle.
@@ -589,10 +744,13 @@ is unavailable. A `DevProvider` fallback supplies dev accounts so `npm run dev` 
 
 ### Working without an enclave
 
-An Acurast job is a *onetime* execution behind a quick tunnel, so the verifier URL baked into
-`Play.tsx` is stale the moment the job ends — and redeploying to change one line of UI is a
-poor loop. `npm run dev` therefore offers **Simulate the enclave**, a switch in the Session
-panel that replaces the deployed verifier with `app/src/chain/mock.ts`, running in the tab.
+An Acurast job is a *onetime* execution, and behind a quick tunnel its hostname is minted at
+boot and dies with the job — so the verifier URL baked into `Play.tsx` is stale the moment
+that job ends, and redeploying to change one line of UI is a poor loop. (A named tunnel
+fixes the churn but not the loop: set `VITE_VERIFIER_URL` at build time and the default
+points at a hostname that outlives any one job. See `e2e/acurast-verifier/.env.example`.)
+`npm run dev` therefore offers **Simulate the enclave**, a switch in the Session panel that
+replaces the deployed verifier with `app/src/chain/mock.ts`, running in the tab.
 
 It is a second implementation of `verifier.mjs`, deliberately faithful: the same
 `sessionIdFor`, the same `keccak256(sign("rainbow-seed-v1" ‖ sessionId))` seed derivation, a
@@ -640,7 +798,7 @@ Check the quota with `dotns bulletin status <ss58> --env devnet`.
 
 ---
 
-## 14. Live reference
+## 15. Live reference
 
 | | |
 |---|---|
@@ -664,7 +822,7 @@ Check the quota with `dotns bulletin status <ss58> --env devnet`.
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 | Symptom | Cause |
 |---|---|
@@ -706,7 +864,7 @@ the old one.
 
 ---
 
-## 16. What this does **not** solve
+## 17. What this does **not** solve
 
 Stated plainly, because a security design that overclaims is worse than one that admits its
 edges.
@@ -729,7 +887,7 @@ denominator matters; those need enclave-submitted results rather than player-rel
 
 ---
 
-## 17. The strongest thing still unbuilt
+## 18. The strongest thing still unbuilt
 
 Publish the **input log to Bulletin** alongside each score.
 

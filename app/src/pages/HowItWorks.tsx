@@ -326,9 +326,11 @@ export function HowItWorks() {
                   <div>
                     <div className="what">A durable verifier endpoint</div>
                     <div className="why">
-                      An Acurast job is a one-time execution behind a quick tunnel, so its hostname is minted at boot
-                      and dies with the job. That is why the verifier URL is a field you can edit rather than a
-                      constant.
+                      Half solved. A named Cloudflare tunnel now holds the hostname: the Processor attaches to it as a
+                      connector, so the URL survives a restart and a reassignment to a different phone instead of being
+                      minted fresh at every boot. The job behind it is still a one-time execution, and every redeploy
+                      mints a new signing key the contract has to be told about — so the verifier URL stays a field you
+                      can edit.
                     </div>
                   </div>
                 </li>

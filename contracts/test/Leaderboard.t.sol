@@ -311,6 +311,36 @@ contract LeaderboardTest is Test {
         board.submit(c, sig);
     }
 
+    function test_rejectsRedirectingToAnotherGame() public {
+        // The interesting case, and the reason it needs its own test: mutating `gameId`
+        // alone dies on `RulesMismatch` long before recovery, so it proves nothing about
+        // the signature. Moving `rulesHash` in step with it keeps the claim structurally
+        // valid all the way through the cheap checks, so this is the version that
+        // actually reaches `ECDSA.tryRecover` — and is refused there.
+        uint64 other = 2;
+        bytes32 otherRules = keccak256("sim-v2");
+        board.registerGame(other, otherRules);
+
+        Leaderboard.ScoreClaim memory c = _claim(alice, 100, board.currentEpoch(), 0);
+        bytes memory sig = _sign(verifierKey, c);
+
+        c.gameId = other;
+        c.rulesHash = otherRules;
+
+        // Assert the premise, so a future change to the check order cannot silently
+        // turn this back into a `RulesMismatch` test that looks like it still passes.
+        assertEq(board.gameRules(c.gameId), c.rulesHash, "claim must survive the cheap checks");
+        assertFalse(board.usedSession(board.sessionIdFor(c.player, c.epoch, c.k)));
+        assertGt(c.score, board.best(c.gameId, c.player));
+
+        vm.expectRevert(Leaderboard.BadAttestation.selector);
+        board.submit(c, sig);
+
+        // And nothing leaked onto either board.
+        assertEq(board.best(other, alice), 0);
+        assertEq(board.best(GAME, alice), 0);
+    }
+
     // -----------------------------------------------------------------------
     // Verifier set management
     // -----------------------------------------------------------------------

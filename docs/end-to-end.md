@@ -103,6 +103,15 @@ node scripts/attest-and-submit.mjs \
   --verifier https://<tunnel> --expect-verifier $ENCLAVE_ADDR --player 0x… --k 0
 ```
 
+`<tunnel>` is a per-run hostname only while the job falls back to a quick tunnel. Set
+`CF_TUNNEL_TOKEN` and `VERIFIER_HOSTNAME` in `e2e/acurast-verifier/.env` and the phone
+instead attaches as a connector to a named tunnel you own: the hostname then lives in
+Cloudflare rather than in the job, and survives a restart or a reassignment to a different
+processor. `.env.example` has the one-time Cloudflare setup. Note that the tunnel must stay
+single-connector — Cloudflare round-robins replicas, and a second phone would sign with a
+key the client never pinned — so `numberOfReplicas` stays 1 and `start.sh` withdraws at boot
+if the public hostname's `/identity` is not its own.
+
 Local iteration without deploying:
 
 ```bash

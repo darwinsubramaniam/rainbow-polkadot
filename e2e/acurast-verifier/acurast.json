@@ -50,6 +50,8 @@
 
       "includeEnvironmentVariables": [
         "WEBHOOK_URL",
+        "CF_TUNNEL_TOKEN",
+        "VERIFIER_HOSTNAME",
         "CONTRACT",
         "CHAIN_ID",
         "GAME_ID",
