@@ -13,7 +13,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 ///         the attestation is well-formed, fresh, unspent, and actually an improvement.
 ///
 /// @dev Ranking is deliberately NOT maintained on-chain. Insertion into a sorted array
-///      is unbounded gas; clients rank off-chain from {NewBest} events instead.
+///      is unbounded gas; clients rank off-chain, reading the board through {board}.
 ///
 /// @custom:cdm @dw3labs/rainbow-leaderboard
 contract Leaderboard is EIP712, Ownable {
@@ -72,6 +72,27 @@ contract Leaderboard is EIP712, Ownable {
     /// @dev Keyed by gameId (defect D3). A single mapping would have made two games
     ///      share one scoreboard while `gameId` sat decoratively in the payload.
     mapping(uint64 gameId => mapping(address player => uint64)) public best;
+
+    /// @notice Every player who has ever scored on a game, in first-score order.
+    ///
+    /// @dev The enumeration {best} alone cannot give. A mapping has no key set, so a
+    ///      client holding only `best` can look up a score it already has an address
+    ///      for and nothing else — it cannot ask "who is on this board", which is the
+    ///      one question a leaderboard exists to answer.
+    ///
+    ///      The original plan was for clients to reconstruct that set from {NewBest}
+    ///      logs. That does not work here: submissions arrive as Substrate
+    ///      `Revive.call` extrinsics, and the Ethereum-RPC view of this chain reports
+    ///      such blocks as having no transactions at all — `eth_getLogs` over this
+    ///      contract's whole history returns an empty array while `eth_call` against
+    ///      the same address answers correctly. The events are real, but unreadable by
+    ///      any Ethereum-shaped client, and no indexer covers this chain.
+    ///
+    ///      So the set lives in storage instead. Append-only and unsorted: one SSTORE
+    ///      on a player's *first* accepted score and never again, which keeps {submit}
+    ///      O(1) and leaves the ordering — the part that is unbounded — off-chain
+    ///      where {board} hands a client everything it needs to do it.
+    mapping(uint64 gameId => address[]) private roster;
 
     /// @notice Consumed sessions. Makes an attestation single-use.
     mapping(bytes32 sessionId => bool) public usedSession;
@@ -160,6 +181,52 @@ contract Leaderboard is EIP712, Ownable {
         );
     }
 
+    /// @notice How many players have ever scored on a game.
+    /// @dev The bound a client needs before it can page through {board}.
+    function playerCount(uint64 gameId) external view returns (uint256) {
+        return roster[gameId].length;
+    }
+
+    /// @notice A slice of a game's board: players and their current best scores.
+    ///
+    /// @dev **Unsorted**, in first-score order, and that is deliberate — see the note
+    ///      on {roster}. The client sorts. Ten rows sorted in a browser costs nothing;
+    ///      keeping them sorted in storage costs an unbounded write on every submit.
+    ///
+    ///      Paginated for the same reason ranking is off-chain: the roster has no upper
+    ///      bound, so a view that returned all of it would eventually exceed the gas a
+    ///      read is allowed and start failing — silently, from the caller's point of
+    ///      view, and only once the board got popular. `offset`/`limit` make that the
+    ///      caller's problem to bound rather than a cliff the contract walks off.
+    ///
+    ///      Scores are read live from {best} rather than stored alongside the address,
+    ///      so an improvement never has to be written in two places and the two can
+    ///      never disagree.
+    ///
+    ///      An `offset` past the end returns empty arrays rather than reverting: a
+    ///      client paging until it gets a short page is the normal way to consume this,
+    ///      and racing a new player joining mid-page should not throw at it.
+    function board(uint64 gameId, uint256 offset, uint256 limit)
+        external
+        view
+        returns (address[] memory players, uint64[] memory scores)
+    {
+        address[] storage all = roster[gameId];
+        uint256 total = all.length;
+        if (offset >= total) return (new address[](0), new uint64[](0));
+
+        uint256 n = total - offset;
+        if (n > limit) n = limit;
+
+        players = new address[](n);
+        scores = new uint64[](n);
+        for (uint256 i; i < n; ++i) {
+            address p = all[offset + i];
+            players[i] = p;
+            scores[i] = best[gameId][p];
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Submission
     // -----------------------------------------------------------------------
@@ -200,6 +267,14 @@ contract Leaderboard is EIP712, Ownable {
         if (err != ECDSA.RecoverError.NoError || !isVerifier[signer]) revert BadAttestation();
 
         usedSession[sessionId] = true;
+
+        // First accepted score on this board: enrol the player so {board} can find
+        // them. `best == 0` is an exact test for "never scored here", not an
+        // approximation — the improvement check above requires `score > best`, so any
+        // stored best is at least 1 and a zero-score claim can never land. Read before
+        // the write below, which is the only order in which that holds.
+        if (best[c.gameId][c.player] == 0) roster[c.gameId].push(c.player);
+
         best[c.gameId][c.player] = c.score;
 
         emit NewBest(c.gameId, c.player, c.score, sessionId, c.epoch);

@@ -222,6 +222,143 @@ contract LeaderboardTest is Test {
     }
 
     // -----------------------------------------------------------------------
+    // Enumeration — what makes an off-chain ranking possible
+    // -----------------------------------------------------------------------
+
+    function test_boardIsEmptyBeforeAnyoneScores() public view {
+        assertEq(board.playerCount(GAME), 0);
+        (address[] memory players, uint64[] memory scores) = board.board(GAME, 0, 10);
+        assertEq(players.length, 0);
+        assertEq(scores.length, 0);
+    }
+
+    function test_scoringEnrolsThePlayer() public {
+        _submit(_claim(alice, 100, board.currentEpoch(), 0));
+
+        assertEq(board.playerCount(GAME), 1);
+        (address[] memory players, uint64[] memory scores) = board.board(GAME, 0, 10);
+        assertEq(players.length, 1);
+        assertEq(players[0], alice);
+        assertEq(scores[0], 100);
+    }
+
+    function test_improvingDoesNotEnrolTwice() public {
+        // The whole reason enrolment is keyed on `best == 0`: a player who improves
+        // eleven times must appear once, or the board fills with one name.
+        uint64 e = board.currentEpoch();
+        _submit(_claim(alice, 100, e, 0));
+        _submit(_claim(alice, 200, e, 1));
+        _submit(_claim(alice, 300, e, 2));
+
+        assertEq(board.playerCount(GAME), 1, "one row per player, not per score");
+
+        (address[] memory players, uint64[] memory scores) = board.board(GAME, 0, 10);
+        assertEq(players.length, 1);
+        assertEq(scores[0], 300, "and the row carries the current best");
+    }
+
+    function test_boardReadsScoresLive() public {
+        // Scores are not copied into the roster, so this cannot drift from `best`.
+        uint64 e = board.currentEpoch();
+        _submit(_claim(alice, 100, e, 0));
+        _submit(_claim(bob, 900, e, 0));
+        _submit(_claim(alice, 950, e, 1));
+
+        (address[] memory players, uint64[] memory scores) = board.board(GAME, 0, 10);
+        assertEq(players.length, 2);
+        for (uint256 i; i < players.length; ++i) {
+            assertEq(scores[i], board.best(GAME, players[i]), "board must agree with best()");
+        }
+    }
+
+    function test_boardIsUnsortedInFirstScoreOrder() public {
+        // Asserted rather than left implicit: the client sorts, and a client that
+        // assumed this came back ranked would show a wrong board with no error.
+        uint64 e = board.currentEpoch();
+        _submit(_claim(alice, 10, e, 0)); // low score, but first to arrive
+        _submit(_claim(bob, 5000, e, 0));
+
+        (address[] memory players,) = board.board(GAME, 0, 10);
+        assertEq(players[0], alice, "insertion order, not rank order");
+        assertEq(players[1], bob);
+    }
+
+    function test_boardPagesAndClampsTheLastPage() public {
+        uint64 e = board.currentEpoch();
+        for (uint160 i = 1; i <= 5; ++i) {
+            _submit(_claim(address(i), uint64(i) * 10, e, 0));
+        }
+        assertEq(board.playerCount(GAME), 5);
+
+        (address[] memory first,) = board.board(GAME, 0, 2);
+        assertEq(first.length, 2);
+        assertEq(first[0], address(uint160(1)));
+
+        // A limit that overruns the end yields a short page rather than reverting —
+        // which is what lets a client page until it sees one.
+        (address[] memory last, uint64[] memory lastScores) = board.board(GAME, 4, 2);
+        assertEq(last.length, 1);
+        assertEq(last[0], address(uint160(5)));
+        assertEq(lastScores[0], 50);
+    }
+
+    function test_boardOffsetPastTheEndIsEmptyNotARevert() public {
+        _submit(_claim(alice, 100, board.currentEpoch(), 0));
+        (address[] memory players,) = board.board(GAME, 99, 10);
+        assertEq(players.length, 0);
+    }
+
+    function test_boardZeroLimitIsEmpty() public {
+        _submit(_claim(alice, 100, board.currentEpoch(), 0));
+        (address[] memory players, uint64[] memory scores) = board.board(GAME, 0, 0);
+        assertEq(players.length, 0);
+        assertEq(scores.length, 0);
+    }
+
+    function test_rostersAreKeyedByGame() public {
+        // Same defect as D3, one layer up: two games sharing a roster would show each
+        // other's players, with the other board's scores read as zero.
+        uint64 other = 2;
+        bytes32 otherRules = keccak256("sim-v2");
+        board.registerGame(other, otherRules);
+
+        _submit(_claim(alice, 100, board.currentEpoch(), 0));
+
+        Leaderboard.ScoreClaim memory c = _claim(bob, 7, board.currentEpoch(), 0);
+        c.gameId = other;
+        c.rulesHash = otherRules;
+        _submit(c);
+
+        assertEq(board.playerCount(GAME), 1);
+        assertEq(board.playerCount(other), 1);
+
+        (address[] memory g1,) = board.board(GAME, 0, 10);
+        (address[] memory g2,) = board.board(other, 0, 10);
+        assertEq(g1[0], alice);
+        assertEq(g2[0], bob);
+    }
+
+    function test_rejectedSubmissionsDoNotEnrol() public {
+        // A revert must leave no trace on the board, or a player could get a row by
+        // submitting something the contract refuses.
+        Leaderboard.ScoreClaim memory c = _claim(alice, 100, board.currentEpoch(), 0);
+        _expectRevertSignedBy(Leaderboard.BadAttestation.selector, rogueKey, c);
+        assertEq(board.playerCount(GAME), 0);
+    }
+
+    function test_relayedScoreEnrolsThePlayerNotTheRelayer() public {
+        Leaderboard.ScoreClaim memory c = _claim(alice, 500, board.currentEpoch(), 0);
+        bytes memory sig = _sign(verifierKey, c);
+
+        vm.prank(relayer);
+        board.submit(c, sig);
+
+        (address[] memory players,) = board.board(GAME, 0, 10);
+        assertEq(players.length, 1);
+        assertEq(players[0], alice, "the roster follows the claim, not msg.sender");
+    }
+
+    // -----------------------------------------------------------------------
     // Replay, expiry, monotonicity
     // -----------------------------------------------------------------------
 
