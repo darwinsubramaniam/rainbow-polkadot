@@ -717,6 +717,221 @@ input:disabled:hover { border-color: var(--line); }
   100% { transform: scale(1); opacity: 1; }
 }
 
+/* -- the boards ----------------------------------------------------------- */
+
+/* Two panels, one shape. The left one is chain state and the right one is this
+   browser's memory of it, and they are deliberately not styled as different
+   kinds of thing — the distinction is made in words, in each panel's note and
+   footnote, rather than by making one look less real than the other. */
+
+.board .panel-head { align-items: center; }
+/* The refresh sits between the heading and the note, so `.note`'s `margin-left:
+   auto` keeps the status pinned right regardless of the button's width. */
+.board .panel-head .tiny { order: 1; }
+.board .panel-head .note { order: 2; }
+
+button.tiny {
+  font-size: .7rem;
+  padding: .2rem .5rem;
+  border-radius: 7px;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .7rem;
+  padding: .48rem .2rem;
+  font-family: var(--mono);
+  font-size: .84rem;
+}
+.row + .row { border-top: 1px solid var(--line-soft); }
+
+.row .place {
+  font-size: .74rem;
+  color: var(--ink-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.row .who {
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row .who .dim { color: var(--ink-faint); }
+/* Tabular figures so the column reads as a ranking rather than a ragged list. */
+.row .score {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The player's own row. Marked rather than moved: a leaderboard that reorders
+   itself to flatter the reader is not a leaderboard. */
+.row.me {
+  background: var(--primary-wash);
+  border-radius: 8px;
+  margin: 0 -.4rem;
+  padding-left: .6rem;
+  padding-right: .6rem;
+}
+.row.me + .row { border-top-color: transparent; }
+.row.me .who { color: var(--ink); }
+.row.landed .place { color: var(--ok); }
+
+.tag {
+  font-size: .62rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: .1rem .3rem;
+  border-radius: 5px;
+  background: var(--primary);
+  color: #fff;
+  flex: none;
+}
+.tag.bad { background: var(--bad-wash); color: var(--bad); }
+
+.panel-body > .empty,
+.panel-body > .hint,
+.panel-body > .bad {
+  margin: 0;
+  font-size: .82rem;
+  line-height: 1.55;
+}
+.panel-body > .empty { color: var(--ink-faint); }
+.panel-body > .bad { color: var(--bad); }
+/* The footnote under a board: what the rows do and do not prove. Small, but the
+   most load-bearing text on the panel. */
+.panel-body > .hint {
+  margin-top: .85rem;
+  padding-top: .7rem;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: .7rem;
+}
+.rows + .hint { margin-top: .85rem; }
+
+/* -- the settings sheet --------------------------------------------------- */
+
+/* Inside the cabinet, over the picture, because the cabinet is what goes
+   fullscreen — a drawer anywhere else would be unreachable exactly when the gear
+   is pressed from fullscreen. */
+.sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: rgb(8 11 17 / 0.97);
+  color: var(--screen-ink);
+  text-align: left;
+}
+.sheet:focus-visible { outline: none; }
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .7rem .9rem;
+  border-bottom: 1px solid var(--screen-line);
+  flex: none;
+}
+.sheet-head h2 { font-size: .9rem; color: #fff; }
+.sheet-head .note {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--screen-dim);
+  margin-left: auto;
+}
+.sheet-head .tiny {
+  background: transparent;
+  color: var(--screen-ink);
+  border-color: var(--screen-line);
+}
+.sheet-head .tiny:hover:not(:disabled) { background: #1c2432; color: #fff; }
+
+.sheet-body {
+  padding: .9rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: .95rem;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The log is why the sheet is open, so it takes the height the controls above it
+   do not want rather than leaving the stage's dark space empty below it. */
+.sheet-body > .field:last-child { flex: 1; min-height: 8rem; }
+.sheet-body > .field:last-child .trace { flex: 1; overflow: auto; }
+
+/* The controls keep their page shapes but invert onto the dark surface, rather
+   than being restyled into a second design. */
+.sheet-body .label,
+.sheet-body label { color: var(--screen-dim); }
+.sheet-body input {
+  background: #10151f;
+  border-color: var(--screen-line);
+  color: var(--screen-ink);
+}
+.sheet-body input:hover { border-color: #2b3547; }
+.sheet-body input:disabled { opacity: .55; }
+.sheet-body .hint { color: var(--screen-dim); }
+.sheet-body button {
+  background: #151b26;
+  border-color: var(--screen-line);
+  color: var(--screen-ink);
+}
+.sheet-body button:hover:not(:disabled) { background: #1c2432; color: #fff; }
+.sheet-body button[aria-pressed="true"] {
+  border-color: var(--cyan);
+  color: #fff;
+  background: #123240;
+}
+.sheet-body .identity {
+  background: #10151f;
+  border-color: var(--screen-line);
+  color: var(--screen-ink);
+}
+.sheet-body .identity .arrow { color: var(--screen-dim); }
+
+/* The log inside the sheet: dark, and taller than it was on the page, since the
+   sheet exists for reading it. */
+.sheet-body .trace {
+  background: #10151f;
+  border: 1px solid var(--screen-line);
+  border-radius: var(--radius);
+  max-height: none;
+  padding: .7rem .8rem;
+}
+.sheet-body .trace > div { color: var(--screen-ink); }
+/* The page's verdict colours are tuned for white and go muddy on this surface —
+   and the `> div` rule above outranks `.trace .ok`, so these have to restate
+   both the colour and enough specificity to win. */
+.sheet-body .trace > .ok { color: #3ddc84; }
+.sheet-body .trace > .bad { color: #ff8a94; }
+.sheet-body .trace .empty,
+.sheet-body .trace summary { color: var(--screen-dim); }
+.sheet-body .trace pre {
+  background: #0a0e15;
+  border-color: var(--screen-line);
+  color: var(--screen-ink);
+}
+
 /* -- trace log ------------------------------------------------------------ */
 
 .trace {

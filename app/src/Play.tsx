@@ -12,11 +12,17 @@ import {
 } from "./chain/attempts";
 import { playerAddress, submitAttestation } from "./chain/submit";
 import { addressOf } from "./chain/leaderboard";
+import { GAME_ID } from "./chain/network";
+import { useBoard } from "./chain/useBoard";
+import { markLanded, remember, type RunRecord } from "./chain/history";
 import { connectWallet, useSignerState } from "./chain/wallet";
 import { Hud } from "./ui/Hud";
 import { TouchPad } from "./ui/TouchPad";
 import { ProofRail, type Step, type StepState } from "./ui/ProofRail";
 import { Verdict } from "./ui/Verdict";
+import { TopBoard } from "./ui/TopBoard";
+import { YourRuns } from "./ui/YourRuns";
+import { Settings, type Line, type LogKind } from "./ui/Settings";
 import { useStoredJson, useStoredString } from "./ui/useStored";
 import { standaloneReason } from "./main";
 
@@ -78,12 +84,6 @@ interface Active {
   seed: string;
 }
 
-type LogKind = "info" | "ok" | "bad";
-interface Line {
-  kind: LogKind;
-  text: string;
-}
-
 export function Play() {
   // Read the context rather than `useProductSDK()`: that hook throws when the
   // provider is absent, and absent is a supported state here — no host means no
@@ -142,6 +142,13 @@ export function Play() {
   const simRecord = useStoredJson<SessionRecord | null>("rainbow.session.sim", null);
   const [record, setRecord] = simulating ? simRecord : liveRecord;
 
+  // Your runs, split by enclave for the same reason the session records are: a
+  // score signed by the dev key in the source can never land, and listing it
+  // beside real ones under the same "best 10" heading would claim otherwise.
+  const liveHistory = useStoredJson<RunRecord[]>("rainbow.history", []);
+  const simHistory = useStoredJson<RunRecord[]>("rainbow.history.sim", []);
+  const [history, setHistory] = simulating ? simHistory : liveHistory;
+
   const [session, setSession] = useState<Active | null>(null);
   const [enclave, setEnclave] = useState<Identity | null>(null);
   const [attestation, setAttestation] = useState<Attestation | null>(null);
@@ -149,6 +156,13 @@ export function Play() {
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<number | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Bumped whenever the board is known to have changed — a landed score — or
+  // when the player asks. A view call is a dry-run, not a subscription, so
+  // nothing tells the app that someone else's run went on-chain.
+  const [boardKey, setBoardKey] = useState(0);
+  const board = useBoard(app ?? null, GAME_ID, player, boardKey);
 
   const say = useCallback((text: string, kind: LogKind = "info") => {
     setLines((l) => [...l.slice(-60), { kind, text }]);
@@ -228,6 +242,12 @@ export function Play() {
         const id = await api.identity();
         setEnclave(id);
         say(`enclave gameId ${id.gameId}, rulesHash ${id.rulesHash.slice(0, 14)}…`);
+        // Worth saying out loud rather than leaving to be discovered: the board
+        // on screen is game GAME_ID, and a run attested for a different one
+        // would land somewhere the player is not looking.
+        if (id.gameId !== GAME_ID) {
+          say(`the board shown is game ${GAME_ID}, but this enclave attests game ${id.gameId}`, "bad");
+        }
       } catch (e) {
         if (next.mode !== "replay") throw e;
         say(`enclave unreachable (${e instanceof Error ? e.message : String(e)})`, "bad");
@@ -283,6 +303,22 @@ export function Play() {
         say(`DISAGREES: device ${ours}, enclave ${theirs}. The enclave's is authoritative.`, "bad");
       }
 
+      // Remember the run now, before submitting. Whether it *lands* is a
+      // separate fact — marked below if it does — but the run happened and the
+      // enclave signed for it, and a submit that reverts should not erase that
+      // from the player's own list.
+      const attested = remember(history, {
+        player,
+        score: att.claim.score,
+        ticks: att.ticks,
+        epoch: session.epoch,
+        k: session.k,
+        at: Date.now(),
+        agreed: theirs === ours,
+        landed: false,
+      });
+      setHistory(attested);
+
       // A simulated attestation is signed by a key printed in the source. The
       // contract's verifier set does not contain it, so submitting would spend
       // a transaction to be told what is already known — and, worse, would let
@@ -319,6 +355,9 @@ export function Play() {
       // keeps the level rather than being charged for a rejected transaction.
       if (out.matches) {
         setRecord({ player, epoch: session.epoch, k: session.k, seed: session.seed, spent: true });
+        setHistory(markLanded(attested, { player, epoch: session.epoch, k: session.k }));
+        // The board just changed, and this is the one moment the app knows it.
+        setBoardKey((k) => k + 1);
         const left = MAX_ATTEMPTS - (session.k + 1);
         say(left > 0 ? `session consumed — ${left} runs left this hour` : "no runs left this hour", "info");
       }
@@ -328,7 +367,20 @@ export function Play() {
     } finally {
       setBusy(null);
     }
-  }, [verifier, simulating, sim, session, game.result, player, enclave, app, setRecord, say]);
+  }, [
+    verifier,
+    simulating,
+    sim,
+    session,
+    game.result,
+    player,
+    enclave,
+    app,
+    setRecord,
+    history,
+    setHistory,
+    say,
+  ]);
 
   /**
    * Switch between the deployed enclave and the one in this tab.
@@ -366,8 +418,6 @@ export function Play() {
       )
       .catch((e: unknown) => say(`wallet: ${e instanceof Error ? e.message : String(e)}`, "bad"));
   }, [say]);
-
-  const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
   // -- the controls on the screen ------------------------------------------
   //
@@ -565,7 +615,35 @@ export function Play() {
                 {muted ? "Sound off" : "Sound on"}
               </button>
               <button onClick={toggleFull}>{full ? "Exit fullscreen" : "Fullscreen"}</button>
+              {/* The session details and the log live behind this. They are for
+                  diagnosing something, not for playing, so they are one press
+                  away rather than permanently on the page. */}
+              <button
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Session settings and log"
+                aria-expanded={settingsOpen}
+                title="Session settings and log"
+              >
+                ⚙
+              </button>
             </div>
+
+            {settingsOpen && (
+              <Settings
+                onClose={() => setSettingsOpen(false)}
+                address={account?.address ?? null}
+                player={player}
+                onConnect={connect}
+                connecting={connecting}
+                where={simulating ? "simulated enclave" : app ? "polkadot host connected" : "standalone — no host"}
+                verifier={verifier}
+                onVerifier={setVerifier}
+                simulated={simulated}
+                onToggleSimulation={toggleSimulation}
+                lines={lines}
+                attestation={attestation}
+              />
+            )}
           </div>
 
           <Hud
@@ -585,100 +663,22 @@ export function Play() {
           <Verdict device={game.result.score} enclave={BigInt(attestation.claim.score)} ticks={attestation.ticks} />
         )}
 
+        {/* What the page under the game is *for*. The contract keeps a score per
+            player and, since this deployment, the roster needed to enumerate
+            them — so the board is chain state, ranked here for display. Your own
+            runs sit beside it as this browser's memory of what the enclave
+            signed, which is a weaker claim and labelled as one.
+
+            The session controls and the technical log that used to occupy these
+            two slots are behind the gear on the stage. */}
         <div className="play-below">
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Session</h2>
-              <span className="note">
-                {simulating ? "simulated enclave" : app ? "polkadot host connected" : "standalone — no host"}
-              </span>
-            </div>
-            <div className="panel-body">
-              <div className="field-row">
-                <div className="field grow">
-                  <label htmlFor="account">Account</label>
-                  {account ? (
-                    <span className="identity">
-                      <span>{short(account.address)}</span>
-                      <span className="arrow">→ plays as</span>
-                      <span>{player ? short(player) : "—"}</span>
-                    </span>
-                  ) : (
-                    <button id="account" className="ghost" onClick={connect} disabled={connecting}>
-                      {connecting ? "Connecting…" : "Connect wallet"}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="field-row">
-                <div className="field grow">
-                  <label htmlFor="verifier">Verifier enclave</label>
-                  <input
-                    id="verifier"
-                    value={verifier}
-                    spellCheck={false}
-                    disabled={simulating}
-                    placeholder="https://verifier.example.com"
-                    onChange={(e) => setVerifier(e.target.value)}
-                  />
-                  {simulating && <span className="hint">unused while the simulator is on</span>}
-                </div>
-              </div>
-
-              {/* Development only. This whole block is compiled away in a
-                  build, along with the simulator it switches on. */}
-              {import.meta.env.DEV && (
-                <div className="field-row">
-                  <div className="field grow">
-                    <span className="label">Development</span>
-                    <div className="dev-row">
-                      <button className="ghost" onClick={toggleSimulation} aria-pressed={simulated}>
-                        {simulated ? "Simulator: on" : "Simulate the enclave"}
-                      </button>
-                      <span className="hint">
-                        {simulated
-                          ? "Seeds, replay and the EIP-712 signature are computed here, by a key that is in the source. Play and attest work with nothing deployed; submitting is refused."
-                          : "Runs the verifier in this tab so play and attest work without an Acurast job or a tunnel."}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Play and Attest are not repeated here. They live on the
-                  screen, where they stay reachable in fullscreen; a second
-                  copy would be both redundant and a competing call to action.
-
-                  No attempt number appears anywhere either. Which slot the
-                  protocol is spending is bookkeeping the player has no decision
-                  to make about — it only ever surfaces as "you are out of runs
-                  for now", and in the technical log. */}
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Log</h2>
-              <span className="note">{lines.length} lines</span>
-            </div>
-            <div className="trace">
-              {lines.length === 0 && (
-                <div className="empty">Connect an account, then start a session. Everything the app does lands here.</div>
-              )}
-              {lines.map((l, i) => (
-                <div key={i} className={l.kind}>
-                  {l.text}
-                </div>
-              ))}
-              {attestation && (
-                <details>
-                  <summary>Signed attestation</summary>
-                  <pre>{JSON.stringify(attestation, null, 2)}</pre>
-                </details>
-              )}
-            </div>
-          </section>
+          <TopBoard view={board} you={player} onRefresh={() => setBoardKey((k) => k + 1)} />
+          <YourRuns
+            history={history}
+            you={player}
+            onChainBest={board.yourBest}
+            simulated={simulating}
+          />
         </div>
       </div>
     </section>

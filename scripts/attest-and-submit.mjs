@@ -28,7 +28,10 @@ const arg = (n, d) => {
 const VERIFIER_URL = arg("verifier");
 const PLAYER = arg("player", "0x00000000000000000000000000000000000000A1");
 const K = Number(arg("k", "3"));
-const CONTRACT = arg("contract", "0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0");
+// Redeployed 2026-07-30 to add the board views; see docs/deployment-devnet.md.
+// The old address still answers `best`, so pointing at it by accident would look
+// like a working run that landed on a board nobody reads.
+const CONTRACT = arg("contract", "0x891548f5268FA27B68553eb4841f9246b38A16fA");
 const RPC = arg("rpc", "https://paseo-assethub-rpc.laissez-faire.trade");
 const EXPECTED_VERIFIER = arg("expect-verifier", "").toLowerCase();
 

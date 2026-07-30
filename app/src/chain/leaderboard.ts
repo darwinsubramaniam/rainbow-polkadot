@@ -59,6 +59,30 @@ export const LEADERBOARD_ABI = [
   },
   {
     type: "function",
+    name: "playerCount",
+    stateMutability: "view",
+    inputs: [{ name: "gameId", type: "uint64" }],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    // The output *names* are load-bearing, not documentation: the SDK decodes a
+    // multi-output call into an object keyed by them, so dropping them would
+    // hand back `{_0, _1}` instead of `{players, scores}`.
+    type: "function",
+    name: "board",
+    stateMutability: "view",
+    inputs: [
+      { name: "gameId", type: "uint64" },
+      { name: "offset", type: "uint256" },
+      { name: "limit", type: "uint256" },
+    ],
+    outputs: [
+      { name: "players", type: "address[]" },
+      { name: "scores", type: "uint64[]" },
+    ],
+  },
+  {
+    type: "function",
     name: "currentEpoch",
     stateMutability: "view",
     inputs: [],

@@ -72,9 +72,20 @@ export const CLOUD_STORAGE: { environment: "devnet" | "paseo" } | false =
  * Only devnet has an address today; the others are deliberately absent rather
  * than guessed, so a premature paseo build fails loudly here instead of sending
  * transactions to an address that means nothing on that chain.
+ *
+ * Redeployed 2026-07-30 to add the board views (`playerCount`, `board`), which
+ * the previous address does not have — it answers `best` correctly and reverts
+ * on anything a leaderboard needs.
+ *
+ * Changing this address is never only a client change. The EIP-712 domain names
+ * `verifyingContract`, so the enclave's signature is bound to whichever address
+ * *it* was configured with: the same claim yields digest `0x10e24cc4…` here and
+ * `0x477d099a…` on the old deployment, both read from the two live contracts. An
+ * attestation signed for one is refused by the other as `BadAttestation`. The
+ * Acurast job's `CONTRACT` env must therefore move in step with this constant.
  */
 const DEPLOYED: Partial<Record<Network, string>> = {
-  devnet: "0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0",
+  devnet: "0x891548f5268FA27B68553eb4841f9246b38A16fA",
 };
 
 /**
@@ -94,6 +105,25 @@ export const PRODUCT_NAME = import.meta.env.VITE_PRODUCT_NAME ?? "dw3labsgame.do
  * must agree or the host funds one account and submits from another.
  */
 export const CONTRACT_ACCOUNT_INDEX = 0;
+
+/**
+ * Which board this build shows.
+ *
+ * A `gameId` on the contract is pinned to a `rulesHash`, so it names a ruleset
+ * rather than a number. The app needs it before any enclave call in order to read
+ * the board on a cold load, which is why it is a build constant here rather than
+ * taken from `/identity`.
+ *
+ * **Two**, not one, and not a guess: the live verifier's `/identity` reports
+ * `gameId: 2` with `rulesHash 0x02bdb80f…`, which is `keccak256` of the current
+ * 33,599-byte `sim.wasm`. Game 1 was the 22,820-byte artifact from E0.2 and is
+ * not registered on this deployment at all — no verifier serves that ruleset any
+ * more, so registering it would advertise a board nobody can play.
+ *
+ * The enclave states its own `gameId`, and a disagreement is worth saying out
+ * loud: it means the board on screen is not the board the run would land on.
+ */
+export const GAME_ID = Number(import.meta.env.VITE_GAME_ID ?? 2);
 
 export const CONTRACT: string = (() => {
   const override = import.meta.env.VITE_CONTRACT;
