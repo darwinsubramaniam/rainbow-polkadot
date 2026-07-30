@@ -1,0 +1,64 @@
+# Local harness for the verifier's shell entrypoint.
+#
+#   cd e2e/acurast-verifier/local-test && ./run.sh
+#
+# Three containers, because the two things start.sh talks to have to be real
+# processes for the test to mean anything: a webhook sink it can POST to, and an
+# Acurast bridge verifier.mjs can ask to sign.
+
+name: rainbow-verifier-local
+
+services:
+  # The breadcrumb channel. Same shape as the deployed sink, printed live.
+  sink:
+    image: node:22-slim
+    command: node /app/sink.mjs
+    volumes:
+      - ./sink.mjs:/app/sink.mjs:ro
+    environment:
+      PORT: "9000"
+
+  # The signer. Runs in its own container and shares the socket through a
+  # volume: verifier.mjs treats a name starting with "/" as a filesystem socket,
+  # which — unlike the abstract socket a real processor provides — can cross a
+  # container boundary. That difference is the reason this is a *mock* bridge.
+  bridge:
+    image: node:22-slim
+    command: node /app/mock-bridge.mjs
+    volumes:
+      - ./mock-bridge.mjs:/app/mock-bridge.mjs:ro
+      - bridge:/shared
+    environment:
+      BRIDGE_SOCKET: /shared/bridge.sock
+
+  # The job itself, starting from an image with no curl and no node.
+  verifier:
+    build:
+      context: .
+      args:
+        BASE: ${BASE_IMAGE:-ubuntu:questing}
+    depends_on: [sink, bridge]
+    volumes:
+      # Mounted where a processor extracts it, so the staging step takes the
+      # same in-place branch it takes in production.
+      - ../app:/root/app:ro
+      - bridge:/shared
+      # A stub cloudflared, so the tunnel branch is exercised without minting a
+      # real public hostname from a laptop.
+      - ./stub-cloudflared.sh:/tmp/cloudflared:ro
+    environment:
+      WEBHOOK_URL: http://sink:9000
+      BRIDGE_SOCKET: /shared/bridge.sock
+      PORT: "3000"
+      CF_SKIP_DOWNLOAD: "1"
+      # Left unset on purpose: with no CF_TUNNEL_TOKEN the quick-tunnel branch
+      # runs, which is the one that needs no credentials. Set VERIFIER_HOSTNAME
+      # and CF_TUNNEL_TOKEN in the environment to exercise the named path.
+      CONTRACT: "0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0"
+      CHAIN_ID: "420420417"
+      GAME_ID: "2"
+      EPOCH_SECONDS: "3600"
+      MAX_SESSIONS_PER_EPOCH: "12"
+
+volumes:
+  bridge:

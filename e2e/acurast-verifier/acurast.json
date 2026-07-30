@@ -35,7 +35,7 @@
       "maxAllowedStartDelayInMs": 60000,
       "restartPolicy": "no",
 
-      "mutability": "Mutable",
+      "mutability": "Immutable",
       "minProcessorReputation": 0,
 
       "usageLimit": {
@@ -46,7 +46,7 @@
 
       "maxCostPerExecution": 160000000000,
       "onlyAttestedDevices": false,
-      "enableDevtools": true,
+      "enableDevtools": false,
 
       "includeEnvironmentVariables": [
         "WEBHOOK_URL",

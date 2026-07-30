@@ -1,14 +1,28 @@
 #!/bin/sh
-# Entrypoint for the E0.3 / E0.4 Acurast Shell deployment.
+# Entrypoint for the Acurast Shell deployment of the Rainbow verifier.
+#
+# SHAPE OF THIS FILE. It is the bootstrap and the running order, and nothing
+# else. Everything down to `source_modules` is deliberately self-contained,
+# because that stretch runs in the one window where the job cannot report: the
+# base proot image ships no curl, so a failure before curl exists produces not a
+# bad message but *no* message. A failed `source` in there would be invisible —
+# exactly the failure class that cost runs 380398 and 380401 an hour of billed
+# silence each. So the blind window depends on nothing it has to find on disk,
+# and the moment curl works the rest of the job is loaded from lib/, where a
+# mistake reports itself.
+#
+# That is also why the reporting helpers below are not a module: the EXIT trap
+# has to be armed before anything can go wrong, which is before there is any
+# directory to source from.
 #
 # DESIGN RULE: the webhook is the ONLY channel back. Acurast DevTools targets
 # mainnet, so a canary deployment's stdout is unreachable — anything not POSTed
-# is lost. Run 1 died between two notifies and left no trace of why. So every
-# step reports, and the EXIT trap reports the exit code plus a log tail, which
-# turns "the job went silent" into an actual message.
+# is lost. So every step reports, and the EXIT trap reports the exit code plus a
+# log tail, which turns "the job went silent" into an actual message.
 #
-# `set -e` is deliberately NOT used. It made run 1 exit silently on a failure
-# that was never reported; explicit checks that notify are strictly better here.
+# `set -e` is deliberately NOT used. It made an early run exit silently on a
+# failure that was never reported; explicit checks that notify are strictly
+# better here.
 
 set -u
 
@@ -23,6 +37,10 @@ export TMPDIR=/tmp
 export HOME="${HOME:-/root}"
 export DEBIAN_FRONTEND=noninteractive
 mkdir -p /tmp
+
+# ---------------------------------------------------------------------------
+# Reporting core. Inline by necessity — see the header.
+# ---------------------------------------------------------------------------
 
 say() { echo "[e0] $*" >>"$LOG" 2>&1; echo "[e0] $*"; }
 
@@ -56,7 +74,7 @@ on_exit() {
   post "" "$(printf '{"stage":"exit","code":%d,"logTail":"%s"}' \
     "$code" "$(tail -40 "$LOG" | esc)")"
   [ -n "${TUNNEL_PID:-}" ] && kill "$TUNNEL_PID" 2>/dev/null
-  [ -n "${PY_PID:-}" ] && kill "$PY_PID" 2>/dev/null
+  [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null
   return 0
 }
 # GOTCHA 3: without an explicit TERM/INT trap the EXIT trap never runs on
@@ -64,235 +82,152 @@ on_exit() {
 trap on_exit EXIT
 trap 'exit 143' TERM INT
 
-say "boot: pwd=$(pwd) \$0=$0 BRIDGE_SOCKET=${BRIDGE_SOCKET:-<unset>} PORT=$PORT"
+# ---------------------------------------------------------------------------
+# Bootstrap helpers, used before any module exists.
+# ---------------------------------------------------------------------------
 
-# --- curl first, so reporting works as early as possible ------------------
-# The base proot image has no curl, which means failures before this point can
-# only be seen on stdout — which we cannot read. Keep this step minimal.
-if ! command -v curl >/dev/null 2>&1; then
-  apt-get update -y >>"$LOG" 2>&1
-  apt-get install -y --no-install-recommends curl ca-certificates >>"$LOG" 2>&1
-fi
-if ! command -v curl >/dev/null 2>&1; then
-  say "curl unavailable after apt — no channel back, aborting"
-  exit 1
-fi
-note "boot" "curl available; pwd=$(pwd) argv0=$0"
+T0=$(date +%s 2>/dev/null || echo 0)
+elapsed() { if [ "$T0" = 0 ]; then echo "?"; else echo "$(( $(date +%s) - T0 ))s"; fi; }
 
-# --- locate the bundle ----------------------------------------------------
+# `timeout` is coreutils and is present in the base image, but guard rather than
+# assume: silently losing the bound is precisely the failure being fixed here.
+if command -v timeout >/dev/null 2>&1; then
+  bounded() { limit=$1; shift; timeout "$limit" "$@"; }
+else
+  bounded() { shift; "$@"; }
+fi
+
+# Report which vars arrived, by NAME only. CF_TUNNEL_TOKEN is a credential and
+# this line goes over the wire, so values are never printed.
+present() { eval "v=\${$1:-}"; if [ -n "$v" ]; then printf '%s=set ' "$1"; else printf '%s=UNSET ' "$1"; fi; }
+
+# ---------------------------------------------------------------------------
+# ensure_curl — the blind window, and the only step that cannot report itself.
+# ---------------------------------------------------------------------------
+#
+# Every apt call is bounded, so a hang becomes a fast failure that frees the
+# assignment instead of consuming the whole of maxExecutionTimeInMs in silence.
+# The instant curl exists we post a reconstruction of what just happened —
+# attempts, exit codes, elapsed seconds, which env vars arrived — so the blind
+# window is at least legible after the fact.
+#
+# Known limit, stated rather than hidden: if apt never yields curl, the abort
+# below is silent too. It cannot be otherwise; curl is the thing that reports.
+ensure_curl() {
+  command -v curl >/dev/null 2>&1 && { note "preflight" "curl already present"; return 0; }
+
+  # `timeout` caps each call as a whole; these keep one stalled mirror
+  # connection from eating that entire budget before the useful work starts.
+  apt_opts="-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=2"
+  trace=""
+  n=0
+  while [ $n -lt 3 ]; do
+    n=$((n + 1))
+    bounded 150 apt-get $apt_opts update -y >>"$LOG" 2>&1
+    rc_u=$?
+    bounded 180 apt-get $apt_opts install -y --no-install-recommends curl ca-certificates >>"$LOG" 2>&1
+    rc_i=$?
+    trace="$trace try$n(update=$rc_u install=$rc_i at=$(elapsed))"
+    command -v curl >/dev/null 2>&1 && break
+    say "apt try $n yielded no curl (update=$rc_u install=$rc_i); retrying"
+    sleep 5
+  done
+
+  if ! command -v curl >/dev/null 2>&1; then
+    # Exit immediately rather than hold the assignment for the rest of the
+    # window: a job that fails its SLA promptly is at least visible on-chain,
+    # which silence is not.
+    say "curl unavailable after apt —$trace — no channel back, aborting"
+    return 1
+  fi
+
+  # The first thing said out loud, and the reason this run is diagnosable.
+  # Exit 124 from a bounded call means it hit the timeout rather than failed.
+  note "preflight" "curl after$trace total=$(elapsed); env: $(present WEBHOOK_URL; present CF_TUNNEL_TOKEN; present VERIFIER_HOSTNAME; present CONTRACT; present CHAIN_ID; present GAME_ID)"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# locate_bundle — inline because it is how everything else is found, lib/
+# included. Sets BUNDLE_DIR and VERIFIER_SRC.
+# ---------------------------------------------------------------------------
+#
 # GOTCHA 4: do NOT trust `dirname $0`. It is a `set -e` hazard and the launcher
 # may invoke the entrypoint in ways that make it useless. Search instead, and
 # report what was actually on disk if the search fails.
-SRC=""
-for cand in \
-  "$(dirname "$0" 2>/dev/null)/verifier.mjs" \
-  "./verifier.mjs" \
-  "/acurast/app/verifier.mjs" \
-  "$HOME/verifier.mjs" \
-  "$HOME/app/verifier.mjs"
-do
-  [ -f "$cand" ] && { SRC="$cand"; break; }
-done
-if [ -z "$SRC" ]; then
-  FOUND="$(find / -name verifier.mjs -maxdepth 6 2>/dev/null | head -5)"
-  if [ -n "$FOUND" ]; then
-    SRC="$(printf '%s' "$FOUND" | head -1)"
-    note "locate" "found via find: $SRC"
-  else
-    fail "locate" "verifier.mjs not found. cwd listing: $(ls -la . 2>&1 | head -20)"
-    exit 1
-  fi
-fi
-note "locate" "verifier.mjs at $SRC"
+locate_bundle() {
+  VERIFIER_SRC=""
+  for cand in \
+    "$(dirname "$0" 2>/dev/null)/verifier.mjs" \
+    "./verifier.mjs" \
+    "/acurast/app/verifier.mjs" \
+    "$HOME/verifier.mjs" \
+    "$HOME/app/verifier.mjs"
+  do
+    [ -f "$cand" ] && { VERIFIER_SRC="$cand"; break; }
+  done
 
-# GOTCHA 5: the bundle is extracted to /root/app, which IS $HOME/app — so the
-# usual "copy out of the bundle dir" step becomes `cp X X` and fails. Copy only
-# when the paths genuinely differ; otherwise run in place. (The copy exists to
-# dodge bind-mounted Android dirs with symlink quirks, which does not apply
-# when the source is already inside the rootfs.)
-real() { readlink -f "$1" 2>/dev/null || echo "$1"; }
-DEST="$HOME/app/verifier.mjs"
-if [ "$(real "$SRC")" = "$(real "$DEST")" ]; then
-  note "stage" "verifier.mjs already at $DEST; running in place"
-else
-  mkdir -p "$HOME/app"
-  # Copy the whole bundle dir: verifier.mjs needs sim.wasm and keccak.mjs beside it.
-  if ! cp -f "$(dirname "$SRC")"/* "$HOME/app/" 2>>"$LOG"; then
-    fail "stage" "cp $(dirname "$SRC")/* -> $HOME/app/ failed"
-    exit 1
-  fi
-  note "stage" "staged bundle -> $HOME/app/"
-fi
-
-# --- python ---------------------------------------------------------------
-if ! command -v node >/dev/null 2>&1; then
-  note "apt" "installing nodejs"
-  apt-get install -y --no-install-recommends nodejs procps >>"$LOG" 2>&1
-fi
-if ! command -v node >/dev/null 2>&1; then
-  fail "apt" "node unavailable after install"
-  exit 1
-fi
-note "apt" "node $(node --version 2>&1)"
-
-# GOTCHA 5: all jobs on a processor share ONE network namespace, so ports are
-# global across job sandboxes and a leaked child EADDRINUSEs this run.
-# /proc/net is blocked so fuser/ss are blind — kill by name.
-pkill -9 -f "verifier.mjs" >/dev/null 2>&1
-pkill -9 -f "cloudflared" >/dev/null 2>&1
-sleep 1
-
-# --- E0.3 -----------------------------------------------------------------
-# Started before any tunnel work: the signing result must not share a fate with
-# E0.4. No pipe to tee here — piping made $! the tee PID in run 1, so the
-# liveness loop was watching the wrong process.
-note "server" "launching verifier.mjs"
-node "$DEST" >>"$LOG" 2>&1 &
-PY_PID=$!
-sleep 10
-
-if ! kill -0 "$PY_PID" 2>/dev/null; then
-  fail "server" "verifier.mjs exited immediately"
-  exit 1
-fi
-
-if curl -m 10 -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
-  note "server" "healthy on $PORT (pid $PY_PID)"
-else
-  note "server" "health check failed but process alive; continuing"
-fi
-
-# The report is the deliverable. POST it raw and unescaped to its own path so
-# it stays valid JSON — the generic note() escaping would mangle it.
-REPORT="$(curl -m 40 -s "http://127.0.0.1:$PORT/report" 2>/dev/null)"
-if [ -n "$REPORT" ]; then
-  post "/report" "$REPORT"
-  note "report" "posted ${#REPORT} bytes to /report"
-else
-  fail "report" "empty response from /report"
-fi
-
-# --- E0.4 -----------------------------------------------------------------
-note "tunnel" "fetching cloudflared arm64"
-if curl -m 180 -sfL -o /tmp/cloudflared \
-  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64
-then
-  chmod +x /tmp/cloudflared
-  note "tunnel" "cloudflared $(/tmp/cloudflared --version 2>&1 | head -1)"
-
-  # GOTCHA 6: flag order. `--no-autoupdate` is a `tunnel` flag; placed after
-  # `run` cloudflared dumps its help text and exits 1.
-  if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
-    # Named tunnel. The public hostname is configured once in the Zero Trust
-    # dashboard and routed to http://localhost:$PORT *as resolved on whichever
-    # connector is currently attached* — so the URL survives this job ending,
-    # restarting, or being reassigned to a different phone. That is the point:
-    # the app stops needing to be told a fresh hostname every run.
-    #
-    # The token is base64 JSON {"a":account,"t":tunnelId,"s":secret}, delivered
-    # encrypted via includeEnvironmentVariables. Never echo it into the log.
-    /tmp/cloudflared tunnel --no-autoupdate run --token "$CF_TUNNEL_TOKEN" \
-      >/tmp/cf.log 2>&1 &
-    TUNNEL_PID=$!
-    sleep 8
-
-    if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-      TUNNEL_URL=""
-      fail "tunnel" "cloudflared exited: $(tail -20 /tmp/cf.log 2>/dev/null | esc)"
-    elif [ -n "${VERIFIER_HOSTNAME:-}" ]; then
-      TUNNEL_URL="https://$VERIFIER_HOSTNAME"
-      note "tunnel" "READY $TUNNEL_URL (named)"
+  if [ -z "$VERIFIER_SRC" ]; then
+    found="$(find / -name verifier.mjs -maxdepth 6 2>/dev/null | head -1)"
+    if [ -n "$found" ]; then
+      VERIFIER_SRC="$found"
+      note "locate" "found via find: $VERIFIER_SRC"
     else
-      # The connector is up and the dashboard's hostname is already serving it;
-      # we just have no way to name it in this report.
-      TUNNEL_URL=""
-      note "tunnel" "connector up, but VERIFIER_HOSTNAME is unset — set it to have the URL reported here"
-    fi
-  else
-    # Fallback: unauthenticated quick tunnel. No account, no DNS, no token —
-    # but the hostname is minted at boot and dies with the job, so someone has
-    # to read it out of this webhook and paste it into the app.
-    /tmp/cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" \
-      >/tmp/cf.log 2>&1 &
-    TUNNEL_PID=$!
-
-    TUNNEL_URL=""
-    i=0
-    while [ $i -lt 40 ]; do
-      TUNNEL_URL="$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cf.log 2>/dev/null | head -1)"
-      [ -n "$TUNNEL_URL" ] && break
-      i=$((i + 1))
-      sleep 3
-    done
-
-    if [ -n "$TUNNEL_URL" ]; then
-      note "tunnel" "READY $TUNNEL_URL (quick — per-run hostname)"
-    else
-      fail "tunnel" "no hostname; cf.log: $(tail -20 /tmp/cf.log 2>/dev/null | esc)"
+      fail "locate" "verifier.mjs not found. cwd listing: $(ls -la . 2>&1 | head -20)"
+      return 1
     fi
   fi
-else
-  fail "tunnel" "cloudflared download failed"
-fi
 
-# --- sole-connector check -------------------------------------------------
-# A named tunnel accepts any number of connectors and load-balances across
-# them. For a stateless website that is free redundancy; here it is a
-# correctness bug. Every deployment mints its own secp256k1 key, so a connector
-# left behind by a previous job answers some fraction of requests with a signer
-# the client never pinned — and the attestation is then rejected on-chain with
-# nothing in either log to say which half of the round trip was wrong.
-#
-# So ask the public hostname who it is, and compare with the local process.
-# Same key => we are the only connector. Different => withdraw, rather than
-# serve half the traffic under an identity that is not ours.
-key_of() { # base-url -> secp256k1 hex, or empty
-  curl -m 20 -s "$1/identity" 2>/dev/null | node -e '
-    let s = "";
-    process.stdin.on("data", (d) => (s += d)).on("end", () => {
-      try { process.stdout.write(String(JSON.parse(s).secp256k1 ?? "")); } catch {}
-    });' 2>/dev/null
+  BUNDLE_DIR="$(dirname "$VERIFIER_SRC")"
+  note "locate" "bundle at $BUNDLE_DIR"
+  return 0
 }
 
-if [ -n "${CF_TUNNEL_TOKEN:-}" ] && [ -n "${TUNNEL_URL:-}" ]; then
-  LOCAL_KEY="$(key_of "http://127.0.0.1:$PORT")"
-
-  if [ -z "$LOCAL_KEY" ]; then
-    # No local key means nothing to compare against — and an empty string would
-    # differ from a perfectly healthy edge answer and tear down our own tunnel.
-    # Skip the check rather than act on a comparison that cannot be trusted.
-    note "tunnel" "WARN local /identity returned no signer — skipping the single-connector check"
-  else
-    EDGE_KEY=""
-    i=0
-    while [ $i -lt 6 ]; do
-      EDGE_KEY="$(key_of "$TUNNEL_URL")"
-      [ -n "$EDGE_KEY" ] && break
-      i=$((i + 1))
-      sleep 5
-    done
-
-    if [ -z "$EDGE_KEY" ]; then
-      # Not fatal, and retrying further will not help: on first setup this is
-      # almost always the public hostname route or the CNAME missing in the
-      # dashboard, which is fixed there, not here.
-      note "tunnel" "WARN $TUNNEL_URL did not answer /identity — check the public hostname route and the CNAME to <tunnel-id>.cfargotunnel.com"
-    elif [ "$EDGE_KEY" != "$LOCAL_KEY" ]; then
-      fail "tunnel" "another connector already serves $TUNNEL_URL (edge signer $EDGE_KEY, ours $LOCAL_KEY) — withdrawing to keep the hostname single-signer"
-      kill "$TUNNEL_PID" 2>/dev/null
-      exit 1
+# ---------------------------------------------------------------------------
+# source_modules — everything past here is reportable, so it can live in files.
+# ---------------------------------------------------------------------------
+source_modules() {
+  missing=""
+  for m in stage runtime server tunnel serve; do
+    if [ -f "$BUNDLE_DIR/lib/$m.sh" ]; then
+      . "$BUNDLE_DIR/lib/$m.sh"
     else
-      note "tunnel" "sole connector on $TUNNEL_URL (signer $LOCAL_KEY)"
+      missing="$missing $m.sh"
     fi
-  fi
-fi
+  done
 
-# --- stay alive for the scheduled window ---------------------------------
-note "serve" "entering serve loop until maxExecutionTimeInMs"
-n=0
-while kill -0 "$PY_PID" 2>/dev/null; do
-  sleep 60
-  n=$((n + 1))
-  [ $((n % 5)) -eq 0 ] && note "heartbeat" "alive ${n}min ${TUNNEL_URL:-no-tunnel}"
-done
-fail "serve" "verifier.mjs died after ${n} minutes"
+  if [ -n "$missing" ]; then
+    # Worth reporting precisely: the bundler zips the app dir verbatim, so a
+    # module going missing means the bundle shipped wrong, not that the phone
+    # misbehaved — a completely different thing to go and fix.
+    fail "modules" "missing from $BUNDLE_DIR/lib:$missing (present: $(ls "$BUNDLE_DIR/lib" 2>&1 | tr '\n' ' '))"
+    return 1
+  fi
+
+  note "modules" "loaded stage runtime server tunnel serve from $BUNDLE_DIR/lib"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# The whole job, at a glance.
+# ---------------------------------------------------------------------------
+main() {
+  say "boot: pwd=$(pwd) \$0=$0 BRIDGE_SOCKET=${BRIDGE_SOCKET:-<unset>} PORT=$PORT"
+
+  ensure_curl           || exit 1
+  locate_bundle         || exit 1
+  source_modules        || exit 1
+
+  stage_bundle          || exit 1
+  ensure_node           || exit 1
+  kill_strays
+
+  start_server          || exit 1
+
+  start_tunnel
+  assert_sole_connector || exit 1
+
+  serve_loop
+}
+
+main "$@"
