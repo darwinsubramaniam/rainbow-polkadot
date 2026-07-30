@@ -1,99 +1,145 @@
-import { Component, useEffect, useState, type ReactNode } from "react";
-import { ProductSDKProvider } from "@parity/product-sdk/react";
-import { isInsideContainer } from "@parity/product-sdk/host";
+import { useEffect, useState, type ReactNode } from "react";
+import { ProductSDKContext } from "@parity/product-sdk/react";
+import { createApp } from "@parity/product-sdk/core";
+import type { App } from "@parity/product-sdk/core";
+
+import { CLOUD_STORAGE, NETWORK } from "./chain/network";
 
 /**
- * Mount the Product SDK when there is a host, and get out of the way when there
- * is not.
+ * Connect to the Product host, and get out of the way if there genuinely is not
+ * one.
  *
- * `ProductSDKProvider` calls `createApp`, which throws "Host storage
- * unavailable" outside the container. The provider sits above the whole tree, so
- * that failure would take the app down with it — including the game and the
- * enclave round-trip, neither of which needs a host.
+ * Two things here are deliberate, and both are scar tissue.
  *
- * Detection uses the SDK's own `isInsideContainer()`, which knows about both
- * Polkadot Browser and Polkadot Desktop.
+ * ## 1. Cloud storage must name its environment, or it takes submitting with it
  *
- * An earlier version inferred this from `window.self !== window.top`, reasoning
- * that a Product is delivered into a cross-origin iframe — which E0.1 measured,
- * but only on the *web gateway*. Polkadot Desktop loads the app top-level, so
- * that check reported "no host" inside a real host and silently disabled
- * submitting. Hence: ask the SDK, never infer from the frame.
+ * `createApp` defaults to `cloudStorage: { environment: "paseo" }` and opens a
+ * connection to **Paseo Bulletin** (`0x8cfe6717…`) during construction. This
+ * Product is published on the Devnet, whose Bulletin is a *different chain*
+ * (`devnet_bulletin`, `0xe101f0fa…`). Polkadot Desktop does not support the
+ * Paseo one, so the whole call rejected:
+ *
+ *     ChainNotSupportedError: Chain 0x8cfe6717… is not supported by the current
+ *     host. It may not be enabled in this host build, or its genesis hash may
+ *     have drifted after a network reset.
+ *
+ * The cost was wildly out of proportion to the cause: an unset default on a
+ * service this app does not use took down the one capability it cannot do
+ * without. `createApp` rejecting meant no host, which meant no signer, which
+ * meant a player holding an enclave-signed attestation was told to go and land
+ * it from a CLI. Asset Hub — the chain that actually matters here — was
+ * supported throughout and was never implicated.
+ *
+ * The documented fix is to name the environment, which is what the quickstart
+ * does. Per the docs, the value is silently wrong rather than loud if you omit
+ * it: "your app reads and writes Bulletin on Paseo, not on this Devnet — a
+ * different chain, so your data is simply not where you expect it and nothing
+ * errors." Here it did error, only because Desktop declines the chain outright.
+ *
+ * `cloudStorage: false` also stops the crash, and this app would never notice
+ * the difference — but it would leave the wrong reason on the record and break
+ * the moment anything here wanted Bulletin. The fallback below is where that
+ * option earns its place instead.
+ *
+ * ## 2. Nothing predicts whether a host exists — we try, and see
+ *
+ * Two earlier versions gated on a predicate and both were wrong in the
+ * expensive direction. The first inferred from `window.self !== window.top`;
+ * Polkadot Desktop loads the app top-level, so it reported "no host" inside a
+ * real one. The second asked `isInsideContainer()`, which outside an iframe is
+ * one synchronous look for a marker the host injects — asked once on mount,
+ * that is a race.
+ *
+ * The failure is asymmetric. A false negative is silent and permanent: the app
+ * quietly drops its one privileged capability and nothing looks broken. A false
+ * positive is immediate and legible: `createApp` rejects and we fall back. So
+ * do not ask. Call `createApp`, and treat only its rejection as absence.
+ *
+ * There is also no error boundary around the children any more. The old one
+ * caught *anything* thrown in the subtree and reported it as "no host", which is
+ * how a chain-support error came to look like a missing host for as long as it
+ * did. Owning the async here means the failure is caught where it happens, with
+ * its real message.
  */
 interface Props {
   children: ReactNode;
   onStandalone: (reason: string) => void;
 }
 
-type Mode = "detecting" | "host" | "standalone";
+/** How long `createApp` may hang before we stop waiting on it. */
+const CONNECT_TIMEOUT_MS = 8000;
+
+type State =
+  | { phase: "connecting" }
+  | { phase: "host"; app: App }
+  | { phase: "standalone" };
 
 export function SdkGate({ children, onStandalone }: Props) {
-  const [mode, setMode] = useState<Mode>("detecting");
+  const [state, setState] = useState<State>({ phase: "connecting" });
 
   useEffect(() => {
-    let cancelled = false;
+    let settled = false;
 
     const standalone = (reason: string) => {
-      if (cancelled) return;
+      if (settled) return;
+      settled = true;
       onStandalone(reason);
-      setMode("standalone");
+      setState({ phase: "standalone" });
     };
 
-    isInsideContainer()
-      .then((inside) => {
-        if (cancelled) return;
-        if (inside) setMode("host");
-        else standalone("not running inside a host container");
-      })
-      // A detection failure is not proof of absence, but there is nothing else
-      // to go on, and the boundary below still covers a host that appears later.
-      .catch((e: unknown) => standalone(e instanceof Error ? e.message : String(e)));
+    // A rejection we can see is handled below. This covers the one we cannot:
+    // a `createApp` that never settles would otherwise leave the app showing
+    // "connecting…" forever, which is worse than falling back.
+    const timer = setTimeout(
+      () => standalone(`host did not respond within ${CONNECT_TIMEOUT_MS}ms`),
+      CONNECT_TIMEOUT_MS,
+    );
+
+    const connected = (app: App) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      setState({ phase: "host", app });
+    };
+
+    // Cloud Storage is a service this app does not use, so it must never be the
+    // reason a player cannot land a score. Ask for the network's own Bulletin;
+    // if the host still will not give it to us, drop the service rather than
+    // the host.
+    createApp({ name: "rainbow", cloudStorage: CLOUD_STORAGE })
+      .then(connected)
+      .catch((e: unknown) => {
+        if (settled) return;
+        const why = e instanceof Error ? e.message : String(e);
+        createApp({ name: "rainbow", cloudStorage: false })
+          .then((app) => {
+            // Worth saying out loud: the app is fully usable, but anything
+            // added later that touches Bulletin will find it missing.
+            console.warn(
+              `[rainbow] cloud storage unavailable on ${NETWORK} (${why}); continuing without it`,
+            );
+            connected(app);
+          })
+          .catch(() => {
+            clearTimeout(timer);
+            standalone(why);
+          });
+      });
 
     return () => {
-      cancelled = true;
+      settled = true;
+      clearTimeout(timer);
     };
-    // `onStandalone` is a stable module-level function; re-running detection on
-    // every render would thrash the host transport.
+    // `onStandalone` is a stable module-level function; re-running this would
+    // thrash the host transport.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (mode === "detecting") return <div className="boot">detecting host…</div>;
-  if (mode === "standalone") return <>{children}</>;
+  if (state.phase === "connecting") return <div className="boot">connecting to host…</div>;
 
-  return <SdkBoundary onFail={onStandalone}>{children}</SdkBoundary>;
-}
+  // Downstream reads `ProductSDKContext` directly and treats null as "no host",
+  // so standalone simply renders the children with no provider above them.
+  if (state.phase === "standalone") return <>{children}</>;
 
-/**
- * Backstop for the case detection cannot cover: the host says it is there but
- * `createApp` fails anyway. Without this the app would render nothing at all.
- *
- * The boundary owns the provider rather than wrapping it from outside. If it
- * merely wrapped, recovering would re-render the same failing provider, and the
- * fallback would never actually drop it.
- */
-interface BoundaryProps {
-  children: ReactNode;
-  onFail: (reason: string) => void;
-}
-
-class SdkBoundary extends Component<BoundaryProps, { failed: boolean }> {
-  state = { failed: false };
-
-  componentDidCatch(error: Error) {
-    if (this.state.failed) return;
-    this.props.onFail(error.message);
-    this.setState({ failed: true });
-  }
-
-  render() {
-    // Without the provider, downstream reads `ProductSDKContext` and gets null
-    // rather than throwing.
-    if (this.state.failed) return <>{this.props.children}</>;
-
-    return (
-      <ProductSDKProvider name="rainbow" fallback={<div className="boot">starting…</div>}>
-        {this.props.children}
-      </ProductSDKProvider>
-    );
-  }
+  return <ProductSDKContext.Provider value={state.app}>{children}</ProductSDKContext.Provider>;
 }

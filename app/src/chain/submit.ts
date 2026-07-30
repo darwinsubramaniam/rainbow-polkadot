@@ -6,11 +6,11 @@
 
 import { createContractFromClient, type AbiEntry } from "@parity/product-sdk/contracts";
 import { ss58ToH160 } from "@parity/product-sdk/address";
-import { devnet_asset_hub } from "@parity/product-sdk-descriptors/devnet-asset-hub";
 import type { App } from "@parity/product-sdk/core";
 
 import type { Attestation } from "./enclave";
 import { CONTRACT, LEADERBOARD_ABI, claimTuple, reconstructSignature } from "./leaderboard";
+import { ASSET_HUB } from "./network";
 import { currentManager } from "./wallet";
 
 /**
@@ -26,14 +26,14 @@ export const playerAddress = (ss58: string): string => ss58ToH160(ss58);
 async function contractHandle(app: App) {
   // Idempotent: connections are cached by the SDK, so calling this per submit
   // costs nothing after the first.
-  await app.chain.connect({ assetHub: devnet_asset_hub });
-  const client = app.chain.getRawClient(devnet_asset_hub);
+  await app.chain.connect({ assetHub: ASSET_HUB });
+  const client = app.chain.getRawClient(ASSET_HUB);
 
   // `signerManager` resolves the selected account at call time, so switching
   // accounts is reflected without rebuilding the handle.
   return createContractFromClient(
     client,
-    devnet_asset_hub,
+    ASSET_HUB,
     CONTRACT as `0x${string}`,
     LEADERBOARD_ABI as unknown as AbiEntry[],
     { signerManager: currentManager() },

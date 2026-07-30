@@ -11,8 +11,10 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import type { Attestation } from "./enclave";
 
-/** Deployed Leaderboard on Paseo Asset Hub. */
-export const CONTRACT = "0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0";
+// The deployed Leaderboard address, chosen by the build's target network.
+// Re-exported here so existing importers keep working; `network.ts` owns it,
+// because the address and the chain it lives on must never be picked apart.
+export { CONTRACT } from "./network";
 
 /**
  * Minimal ABI — only what this app calls.

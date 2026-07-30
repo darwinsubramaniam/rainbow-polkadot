@@ -158,9 +158,15 @@ enclave's own claim, and the public hostname was then confirmed to serve that sa
 so the entry is derivable from chain state rather than trusted (see
 [E0.3/E0.4](E0.3-E0.4-acurast.md)).
 
-It is **per deployment**: every redeploy mints a new address, and since `acurast.json` now
-sets `mutability: "Immutable"`, `reuseKeysFrom` is not available to avoid that. Add without
-removing, so an in-flight attestation from a previous job is not invalidated mid-round.
+The address tracks the **verifier bundle**, not the deployment: redeploying identical bytes
+returns the same key and needs no transaction, while any edit to `start.sh` or `lib/*.sh`
+rotates it and requires a fresh `setVerifier`. Job 380404 redeployed 380403's bundle
+unchanged and reused `0xce0d7dfa…` exactly (see [E0.3/E0.4](E0.3-E0.4-acurast.md)). Add
+without removing, so an in-flight attestation from a previous job is not invalidated
+mid-round.
+
+Read the key from the assignment rather than assuming either way — `acurast deployments <id>`
+prints it, and comparing costs nothing next to a silently-rejected attestation.
 
 ```bash
 node scripts/revive-call.mjs --to $CONTRACT \

@@ -772,6 +772,43 @@ that from becoming confusing rather than obvious:
 The switch and the module behind it are gated on `import.meta.env.DEV` and reached through a
 dynamic `import()`, so a build drops both — which matters, given the byte quota below.
 
+### Choosing the network
+
+One flag decides three things that must never be chosen separately — the Asset Hub the
+contract lives on, the Bulletin chain Cloud Storage talks to, and the contract address:
+
+```bash
+npm run build                                  # devnet (default)
+VITE_NETWORK=paseo VITE_CONTRACT=0x… npm run build
+VITE_NETWORK=polkadot VITE_CONTRACT=0x… npm run build   # Cloud Storage off: no Bulletin yet
+```
+
+`src/chain/network.ts` owns it and `vite.config.ts` reads the same variable to decide which
+chain metadata to keep, so what the app asks for and what it ships metadata for cannot
+drift. Only devnet has a recorded contract address; the others require `VITE_CONTRACT` and
+fail loudly at startup without it, rather than sending transactions to an address that
+means nothing on that chain.
+
+> **`createApp`'s `cloudStorage.environment` defaults to `paseo`, and that default cost a
+> day.** This Product runs on the Devnet, whose Bulletin is a *different chain*. Polkadot
+> Desktop does not support Paseo Bulletin, so `createApp` rejected with
+> `ChainNotSupportedError: Chain 0x8cfe6717… is not supported by the current host` — which
+> the SDK gate then reported as **"no host"**, silently disabling on-chain submitting while
+> the game and the enclave round-trip kept working. A player got an enclave-signed
+> attestation and was told to go and land it from a CLI.
+>
+> Asset Hub was correct throughout and was never implicated. The
+> [official docs](https://docs.polkadotcommunity.foundation/getting-started/developers/)
+> warn that the usual form is *silent* — "your data is simply not where you expect it and
+> nothing errors". We only got a loud failure because Desktop declines the chain outright.
+>
+> Two lessons are baked into `SdkGate.tsx`. **Never predict whether a host exists** — two
+> versions gated on a predicate (`window.self !== window.top`, then `isInsideContainer()`)
+> and both were wrong in the silent direction; call `createApp` and treat only its
+> rejection as absence. And **never let an unused service take down a needed one**: if
+> Bulletin is refused, the gate retries with `cloudStorage: false` and warns, rather than
+> losing the signer.
+
 ### Publishing
 
 ```bash
@@ -813,9 +850,10 @@ Check the quota with `dotns bulletin status <ss58> --env devnet`.
 | Game 2 `rulesHash` | `0x02bdb80f…bd049b` = `keccak256(sim.wasm)` — the platformer |
 | `sim.wasm` (game 2) | 33,599 bytes, ABI version 2 |
 | Product app | `dw3labsgame.dot` — https://dw3labsgame.dev-dot.li |
-| App bundle CID | `bafybeigiuyyktl7jyvhtkywkyrgxjp6zmg264uubjwfcyedmmayrdsk4em` (2026-07-30) |
+| App bundle CID | `bafybeigipav5zgbgzichirstpq2zum4c77b7q4r2efpmvxuaoodnuvq3qe` (2026-07-30) |
+| Network flag | `VITE_NETWORK` — `devnet` (default), `paseo`, `polkadot` |
 | Verifier | `https://rainbow-verifier.dw3labs.work` — baked in as the default |
-| Registered verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (Acurast `380403`) |
+| Registered verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (Acurast `380403`, reused unchanged by `380404`) |
 
 > **A new ruleset is a new `gameId`, never a mutated hash.** `gameRules` is write-once by
 > design (defect D3): scores earned under one set of physics must not share a board with
@@ -834,7 +872,10 @@ Check the quota with `dotns bulletin status <ss58> --env devnet`.
 | `wasm 'unreachable'` in `validate_transaction` | `@polkadot/api` building extrinsic v4 — use papi |
 | `Incompatible runtime entry Tx(Revive.call)` | papi field names — `weight_limit`, `dest` as hex string, `data` as `Uint8Array` |
 | Acurast job stuck "finding the processor" | no `instantMatch`, or `usageLimit` exceeds what the device advertises |
-| Acurast job dies silently | DevTools is **mainnet-only** — a canary job has no stdout. Instrument with a webhook. |
+| Acurast job dies silently | No channel before curl installs. Bound apt, post a `preflight` line, and check the sink — see [E0.3/E0.4](E0.3-E0.4-acurast.md). CLI 0.10 also prints a Canary DevTools view key now, though whether it streams is unverified. |
+| App says "no host" inside Polkadot Desktop | Almost never a missing host. `createApp` rejected — most likely `cloudStorage.environment` defaulting to `paseo` and the host declining Paseo Bulletin. Check the console for the real error. |
+| `ChainNotSupportedError: Chain 0x8cfe6717…` | That is **Paseo Bulletin**. Pass `cloudStorage: { environment: "devnet" }` (or set `VITE_NETWORK`). |
+| Attestation valid but the app will not submit | The signer comes from the host; no host means no submit. Fix the `createApp` failure rather than reaching for `scripts/serve-game.mjs`. |
 | `apt` exits 100 in the proot | `TMPDIR` leak — `export TMPDIR=/tmp` first |
 | `cp X X failed` in the job | the bundle extracts to `/root/app`, which **is** `$HOME/app` |
 | `rulesHash` changed after a comment-only edit | `overflow-checks = true` bakes panic `file:line:col` into the binary, so **adding a comment to `crates/sim` shifts line numbers and changes the artifact**. See below. |

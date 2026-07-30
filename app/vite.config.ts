@@ -13,7 +13,19 @@ import react from "@vitejs/plugin-react";
  * *byte quota*, not a fee: the deploying account here is authorized for 20 MB,
  * so shipping the dead metadata would leave room for barely two deploys.
  */
-const USED_METADATA = ["devnet_asset_hub"];
+const NETWORK = process.env.VITE_NETWORK ?? "devnet";
+
+if (!["devnet", "paseo", "polkadot"].includes(NETWORK)) {
+  throw new Error(`VITE_NETWORK must be devnet, paseo or polkadot — got "${NETWORK}"`);
+}
+
+// Derived from the same flag `src/chain/network.ts` reads, so the metadata that
+// ships and the chains the app asks for cannot drift apart. Polkadot has no
+// Bulletin yet, and `network.ts` disables Cloud Storage there accordingly.
+const USED_METADATA = [
+  `${NETWORK}_asset_hub`,
+  ...(NETWORK === "polkadot" ? [] : [`${NETWORK}_bulletin`]),
+];
 
 /**
  * Replace unused chain metadata with an empty module.
@@ -21,8 +33,13 @@ const USED_METADATA = ["devnet_asset_hub"];
  * Deliberately narrow: it matches only the descriptors package's generated
  * `*_metadata` modules, and only those not on the allowlist above. Anything
  * that then tried to connect to a stubbed chain would fail loudly at that call
- * rather than silently misbehave — and nothing in this app does, because the
- * only `chain.connect` is Asset Hub on devnet.
+ * rather than silently misbehave.
+ *
+ * `devnet_bulletin` is on the allowlist even though no code here calls Cloud
+ * Storage, because `createApp` connects Bulletin while constructing the app —
+ * see `SdkGate.tsx`. Stubbing it would break host connection itself, which is
+ * a far worse failure than a slightly larger bundle: it is the difference
+ * between a player landing a score and being told to run a CLI.
  */
 function dropUnusedChainMetadata(): Plugin {
   const dropped = new Set<string>();
