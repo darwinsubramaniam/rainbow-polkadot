@@ -305,7 +305,11 @@ export function Play() {
       // The enclave address only picks the signature's recovery id; the
       // contract recovers the signer itself and checks its own verifier set,
       // so a wrong value here reverts rather than forging an acceptance.
-      const out = await submitAttestation(app, att, addressOf(enclave.secp256k1));
+      const out = await submitAttestation(app, att, addressOf(enclave.secp256k1), () =>
+        // A one-time `map_account`, and the reason two wallet prompts appear on
+        // a player's first ever submit rather than one.
+        say("first submit for this product — approving its one-time chain mapping…", "info"),
+      );
       setLanded(out.matches);
       if (!out.matches) setFailed(6);
       say(`best(${att.claim.gameId}) is now ${out.best}`, out.matches ? "ok" : "bad");

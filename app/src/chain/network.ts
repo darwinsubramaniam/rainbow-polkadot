@@ -77,6 +77,24 @@ const DEPLOYED: Partial<Record<Network, string>> = {
   devnet: "0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0",
 };
 
+/**
+ * The dotNS name this Product is published under.
+ *
+ * Not cosmetic: it is half of a `ProductAccountId` (`{dotNsIdentifier,
+ * derivationIndex}`), so it identifies the account the host derives for us and
+ * sponsors. Getting it wrong yields a different account with no allowance.
+ */
+export const PRODUCT_NAME = import.meta.env.VITE_PRODUCT_NAME ?? "dw3labsgame.dot";
+
+/**
+ * Derivation index of the product account that signs contract calls.
+ *
+ * The same index is passed to `requestResourceAllocation` as
+ * `SmartContractAllowance`, which pre-warms that exact account's PGAS. The two
+ * must agree or the host funds one account and submits from another.
+ */
+export const CONTRACT_ACCOUNT_INDEX = 0;
+
 export const CONTRACT: string = (() => {
   const override = import.meta.env.VITE_CONTRACT;
   if (override) return override;

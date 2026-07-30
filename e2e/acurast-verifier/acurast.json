@@ -10,12 +10,12 @@
         "sha256": "5ab35b90cd9a9f180656261ba400a135c4c01c2da4b74522118342f985c2d328"
       },
       "network": "canary",
-      "requiredModules": ["Shell"],
-
+      "requiredModules": [
+        "Shell"
+      ],
       "minProcessorVersions": {
         "android": "1.26.0"
       },
-
       "assignmentStrategy": {
         "type": "Single",
         "instantMatch": [
@@ -26,28 +26,25 @@
         ]
       },
       "numberOfReplicas": 1,
-      "processorWhitelist": ["5CHmRH4ceUVcjqNG3vkkDLk3NoLfkKMdyyqLKVVMzRbR5rdq"],
-
+      "processorWhitelist": [
+        "5CHmRH4ceUVcjqNG3vkkDLk3NoLfkKMdyyqLKVVMzRbR5rdq"
+      ],
       "execution": {
         "type": "onetime",
         "maxExecutionTimeInMs": 3600000
       },
       "maxAllowedStartDelayInMs": 60000,
       "restartPolicy": "no",
-
       "mutability": "Immutable",
       "minProcessorReputation": 0,
-
       "usageLimit": {
         "maxMemory": 2000,
         "maxNetworkRequests": 10,
         "maxStorage": 10000
       },
-
       "maxCostPerExecution": 160000000000,
       "onlyAttestedDevices": false,
       "enableDevtools": false,
-
       "includeEnvironmentVariables": [
         "WEBHOOK_URL",
         "CF_TUNNEL_TOKEN",
