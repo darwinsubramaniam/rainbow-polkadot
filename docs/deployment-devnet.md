@@ -1,44 +1,200 @@
 # Deployment — Polkadot Products Devnet
 
-**Live** (2026-07-29). Deployed with `cdm`, verified end-to-end on-chain.
+**Live** (2026-07-30). Deployed with `cdm`, verified on-chain.
 
 | | |
 |---|---|
-| Contract | **`0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0`** |
+| Contract | **`0x891548f5268FA27B68553eb4841f9246b38A16fA`** |
 | CDM package | `@dw3labs/rainbow-leaderboard` |
 | Chain | Paseo Asset Hub, EVM chain id **420420417** |
 | Owner | `0x50AFf5a51BE03d5914D9b5A42c548Dc35A73f7D8` (mapped from `5GmrGRR2…`) |
-| Compiler | Resolc v1.4.0 + Solc v0.8.28 → 37.3 KB PolkaVM |
-| Metadata | `bafk2bzaceddal7nhqmecnensoi72ky5dkvqt4fd64w6mucgjdvg7njmc2dley` |
+| Compiler | Resolc v1.4.0 + Solc v0.8.28 → 46.4 KB PolkaVM |
+| Metadata | `bafk2bzacebisdbwwcflbiqu3cptjyumw7enfbriwqswubvu5xp2msp64au3t2` |
 | `epochSeconds` | 3600 |
 | `maxSessionsPerEpoch` | 12 |
-| Game 1 `rulesHash` | `0x229be8b7d3e8a9a5027edfc677153d4d10d0751be59a63ea6cce60f858bd479c` |
+| Game **2** `rulesHash` | `0x02bdb80f1e5195422ac6204060295b6733e2fc1cef196fc49af654f970bd049b` |
+| Verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (registered in `#11595667`) |
 
-`rulesHash` is `keccak256(sim.wasm)` over the exact 22,820-byte artifact from
-[E0.2](E0.2-determinism.md) (`sha256 c56a68b3…e0b5`). The rules *are* that artifact, so the
-board is pinned to a simulation anyone can hash and check.
+`rulesHash` is `keccak256(sim.wasm)` over the current 33,599-byte artifact
+(`sha256 134633be…`). The rules *are* that artifact, so the board is pinned to a simulation
+anyone can hash and check.
+
+**The board is game 2, not game 1.** The live verifier's `/identity` reports `gameId: 2` with
+that rulesHash, and it is the verifier that decides what a landed score means. Game 1 was the
+22,820-byte artifact from [E0.2](E0.2-determinism.md) (`0x229be8b7…`) and is deliberately
+**not** registered here — no deployed verifier serves that ruleset, so registering it would
+advertise a board nobody can play. `app/src/chain/network.ts` therefore defaults
+`GAME_ID` to 2.
+
+## The verifier had to be repointed (done: job 380406)
+
+The EIP-712 domain names `verifyingContract`, so an attestation is bound to the address the
+*enclave* was configured with — and the job is still configured with the previous one. Read
+from both live contracts, the same claim hashes:
+
+```
+scoreDigest(claim) on 0x891548f5…  → 0x10e24cc4c513192d99693b950c8d47ac0390170ea9d048fb275e8236093c55e5
+scoreDigest(claim) on 0x9cc62a70…  → 0x477d099a56d03403e88f1405f295d7491347e745b3c3704ed9e369525f571fbc
+```
+
+A signature over the second is refused by the first as `BadAttestation`. Until the job moved,
+the app could play and attest but every submit reverted.
+
+**Job 380406** (2026-07-30, canary) carries `CONTRACT=0x891548f5…` and reports it on
+`/identity`. Its bundle is byte-identical to 380405's (`ipfs://QmaKwfk9y…`), and the key was
+**preserved** — the on-chain assignment publishes `SECP256k1 0x032cd907…`, which derives to
+`0xce0d7dfa…`, already registered above. So no `setVerifier` was needed, which is the
+practical confirmation that `CONTRACT` being an env var rather than a bundle file keeps the key
+stable. Keep `app/` byte-identical if you want that to stay true: any edit under it — even a
+comment — rotates the key and costs a fresh `setVerifier`.
+
+`CONTRACT` is an Acurast **environment variable** (see the env list in
+`e2e/acurast-verifier/acurast.json`), not a file in the signed bundle, so changing it should
+not rotate the signing key — the key tracks the bundle. Read it back from the new assignment
+anyway rather than assuming, exactly as [E0.3/E0.4](E0.3-E0.4-acurast.md) argues:
+
+```bash
+# e2e/acurast-verifier/.env
+CONTRACT=0x891548f5268FA27B68553eb4841f9246b38A16fA
+
+acurast deploy                       # then read the key off the new assignment
+acurast deployments <id> -n canary   # if it is no longer 0xce0d7dfa…, setVerifier the new one
+```
+
+> **`-n canary`.** The CLI defaults to `mainnet` and this project is on `canary`
+> (`acurast.json`), so the default silently queries the wrong network — `deployments list`
+> comes back "Database query exceeded timeout" or "fetch failed" rather than saying so.
+
+### Wait for the old job to end before deploying the repointed one
+
+`assert_sole_connector` in `app/lib/tunnel.sh` cannot catch this particular collision, and
+that is worth knowing before relying on it. It compares the *signing key* at the public
+hostname against the local one — but the key tracks the bundle, so a repointed redeploy of
+identical bytes has **the same key**. Two overlapping jobs would pass the check while signing
+for two different `verifyingContract` domains, and Cloudflare would round-robin between them:
+roughly half of all submissions reverting `BadAttestation`, with nothing in either log to say
+why. Closing it properly means comparing `/identity`'s `contract` and `gameId` too, which
+costs a key rotation to ship (any edit under `app/` changes the bundle).
+
+Until then the rule is operational, and it is what was done here: these are `onetime` jobs
+with a one-hour `maxExecutionTimeInMs` and `restartPolicy: no`, so let the previous one end —
+the tunnel starts answering **530** when no connector is left — and only then deploy.
+
+### The previous deployment
+
+`0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0` is not migrated and not deleted. It still holds
+`best(1, 0x…00A1) = 12345` from the original bring-up and `best(2, 0x…00A1) = 255` from the
+first real Polkadot Desktop submission. Scores do not move: a new address is a new EIP-712
+domain, so the two boards are separate by construction. The new board starts empty.
 
 ## Verified on-chain, not just in tests
 
-Unit tests run on the EVM under `solc`. Production runs **PolkaVM under `resolc`**, which
-is a different backend — so EIP-712 domain construction and `ecrecover` were re-proven
-against the live deployment:
+Unit tests run on the EVM under `solc`. Production runs **PolkaVM under `resolc`**, which is a
+different backend, so anything that depends on it gets re-proven against the live deployment
+rather than trusted from the test suite.
+
+Read back from `0x891548f5…` after setup:
 
 ```
-registerGame           → gameRules(1) == keccak256(sim.wasm)          ✓
-setVerifier (temp key) → isVerifier == true                           ✓
-scoreDigest            → read from the DEPLOYED contract              ✓
+owner()             → 0x50AFf5a5…                       ✓ mapped from 5GmrGRR2…
+epochSeconds()      → 3600      maxSessionsPerEpoch()   → 12
+before setup:       → UnknownGame / no verifier         ✓ fails closed
+registerGame(2, …)  → gameRules(2) == 0x02bdb80f…       ✓ block #11595644
+setVerifier(ce0d…)  → isVerifier == true                ✓ block #11595667
+playerCount(2)      → 0                                 ✓ the view EXISTS (it reverts on 0x9cc62a70…)
+board(2, 0, 10)     → two empty arrays                  ✓ well-formed ABI encoding
+scoreDigest(claim)  → 0x10e24cc4…                       ✓ differs from the old deployment's
+```
+
+`playerCount` and `board` returning rather than reverting is the whole point of this redeploy:
+under `resolc` the empty-array encoding is what the app decodes, and it decodes.
+
+Both dry-runs before the owner calls estimated 83,755,808 plancks and matched what executed.
+
+### A score landed, and the board shows it (block #11596233)
+
+Run end-to-end against the repointed verifier (job 380406) with
+`scripts/attest-and-submit.mjs`:
+
+```
+enclave secp256k1  032cd907…  → address 0xce0d7dfa…      ✓ matches the on-chain assignment
+enclave rulesHash  0x02bdb80f…                            ✓ matches gameRules(2)
+attestation        score 25 over 36000 ticks, epoch 495945, k 0
+                   — computed BY the enclave; no score was ever sent to it
+signature          64 bytes r‖s, recovered v = 28         ✓ E0.3 reconstruction still holds
+submit             ok, block #11596233, fee est. 99,755,808
+best(2, 0x…00A1)   25                                     ✓ MATCHES the attested score
+```
+
+and the enumeration this redeploy exists for:
+
+```
+playerCount(2)   → 1
+board(2, 0, 10)  → ([0x…00A1], [25])
+```
+
+The app's own read path was then checked against those exact return bytes — decoded with the
+ABI entry from `app/src/chain/leaderboard.ts` through the same `decodeFunctionResult` the SDK
+calls, then the SDK's multi-output normalisation, then `rank()`:
+
+```
+raw 386 chars → { players: ["0x…00A1"], scores: [25n] } → #1 0x…00A1 25
+rankOf(ranked, "0x…00a1") → 0
+```
+
+Two things that would each have been a silent wrong answer: the **named** ABI outputs are what
+make it `{players, scores}` rather than `{_0, _1}`, and the contract returns a **checksummed**
+address while the app derives a lowercase one from `ss58ToH160` — so the player's own row is
+matched case-insensitively or it never highlights.
+
+The submission was relayed — sent by the Substrate account, credited to `0x…00A1` — so gasless
+relaying is re-proven on this address too.
+
+### And the published app reads it (CID `bafybeigw5zxqde…`)
+
+Published with `pad ./dist dw3labsgame.dot --env devnet`, finalised at block **11596472**,
+`contenthash` verified on-chain and P2P retrieval confirmed in 266 ms. Then opened in a real
+browser — the only way, since the gateway serves a resolver shell that makes both `/` and
+`/sim.wasm` return the same HTML, and headless Chrome cannot run the smoldot light client that
+resolves it:
+
+```
+iframe → dw3labsgame.app.dev-dot.li/?cid=bafybeigw5zxqde…&network=devnet   ✓ CID matches
+Top 10  ·  2 players · 0s ago
+  1  0xE2a7…5F2c   4050
+  2  0x0000…00A1     25
+```
+
+This is the piece the CLI run could not prove: the panel's host path — `getRawClient` →
+`createContractFromClient` → `.query()` → paging → `rank()` — working inside a published
+Product against live chain state. Note row 1: it is **second** in the contract's roster order
+and first on screen, which is the unsorted-on-chain/ranked-in-client split doing its job.
+
+Pre-publish checks, run against `dist/` rather than trusted (the whole build is inspectable):
+
+```
+bundle           3.81 MB of the 20 MB authorization
+sim.wasm         33,599 bytes, keccak256 0x02bdb80f… == gameRules(2)
+new contract     0x891548f5… present · OLD 0x9cc62a70… absent (0 occurrences)
+GAME_ID          inlined as 2
+verifier URL     rainbow-verifier.dw3labs.work baked in
+trycloudflare    1 occurrence — the migration's own endsWith test
+dev-only code    mock enclave and DevProvider tree-shaken
+```
+
+### On the previous deployment (2026-07-29)
+
+The original bring-up proved the same seam there, including the parts not re-run above:
+
+```
 submit                 → best(1, player) = 12345, session consumed    ✓
 replay same session    → reverts 0x36177dda == SessionAlreadyUsed()   ✓
 setVerifier(false)     → temp key removed; score survives             ✓
 ```
 
-The signing key used for that submission was a throwaway, registered only to exercise the
-path and **removed immediately afterwards**. The contract currently has **no verifier**, so
-it accepts nothing until a real Acurast deployment key is registered — it fails closed.
-
-The submission was also relayed: sent by the Substrate account, credited to
-`0x…00A1`. Gasless relaying works on the real chain.
+That submission used a throwaway signing key, registered only to exercise the path and removed
+immediately afterwards. It was also relayed — sent by the Substrate account, credited to
+`0x…00A1` — so gasless relaying works on the real chain.
 
 ## There are two deployment paths, and the simpler one is official
 
@@ -126,6 +282,58 @@ Owner calls go through `revive.call` signed by the sr25519 key: `scripts/revive-
 `Revive.call`'s papi fields also have to be exact — `weight_limit` (not `gas_limit`),
 `dest` as a plain hex string (not `Binary`), `data` as `Uint8Array` (not `Binary`).
 Anything else yields only `Incompatible runtime entry Tx(Revive.call)`.
+
+## Why the board needed a redeploy (2026-07-30)
+
+The contract carries the enumeration a leaderboard needs — a per-game roster appended on a
+player's first accepted score, plus `playerCount(gameId)` and `board(gameId, offset, limit)`.
+`0x9cc62a70…` predates all three and reverts on them, which is what forced the new address at
+the top of this file.
+
+A redeploy is never just `cdm deploy`. The sequence that was actually run:
+
+```bash
+export PATH="$HOME/.foundry-polkadot/bin:$PATH"
+cdm build -n devnet && cdm deploy -n devnet          # → 0x891548f5…
+A=0x891548f5268FA27B68553eb4841f9246b38A16fA
+R=0x02bdb80f1e5195422ac6204060295b6733e2fc1cef196fc49af654f970bd049b   # keccak256(sim.wasm)
+
+node scripts/revive-call.mjs --to $A --data "$(cast calldata 'registerGame(uint64,bytes32)' 2 $R)" --dry-run
+node scripts/revive-call.mjs --to $A --data "$(cast calldata 'registerGame(uint64,bytes32)' 2 $R)"
+node scripts/revive-call.mjs --to $A --data "$(cast calldata 'setVerifier(address,bool)' 0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2 true)"
+```
+
+then `DEPLOYED.devnet` and `GAME_ID` in `app/src/chain/network.ts` (or `VITE_CONTRACT` /
+`VITE_GAME_ID` at build time), and — still outstanding — the job's `CONTRACT` env.
+
+Note the `gameId` is **2**, taken from the verifier's `/identity` rather than from this file's
+previous "Game 1" row, which had gone stale against the deployed enclave. Ask the thing that
+signs, not the doc.
+
+### Why the roster exists at all, given `NewBest`
+
+The original design said clients rank off-chain from `NewBest` logs, and the contract still
+emits them. **They are unreadable from any Ethereum-shaped client on this chain.** Measured
+against `https://paseo-assethub-rpc.laissez-faire.trade`:
+
+```
+eth_call    gameRules(1)                      → 0x229be8b7…  ✓ correct
+eth_getLogs address=0x9cc62a70, fromBlock=0x0 → []
+eth_getBlockByNumber 11590096                 → transactions: []
+```
+
+Block `#11590096` is where `setVerifier` landed, so that block demonstrably contains a
+contract call — the ETH-RPC view simply does not surface Substrate `Revive.call` extrinsics
+as transactions, and therefore emits no logs for them. No indexer covers the chain either
+(`blockscout-passet-hub…` does not resolve, `assethub-paseo.subscan.io/api` 404s).
+
+So enumeration had to be storage. It costs one SSTORE per player, once, and keeps the
+unbounded part — the ordering — off-chain, which is what `board`'s `offset`/`limit` is for.
+
+A personal *top ten* is a different matter: the contract stores one score per player by
+design, so the app keeps its own list of the runs it attested (`app/src/chain/history.ts`)
+and labels that panel as this-device memory. The scores in it are still enclave-signed; only
+the list is local.
 
 ## Operating it
 

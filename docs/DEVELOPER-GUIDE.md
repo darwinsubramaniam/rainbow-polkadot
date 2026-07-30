@@ -839,26 +839,29 @@ Check the quota with `dotns bulletin status <ss58> --env devnet`.
 
 | | |
 |---|---|
-| Contract | `0x9cc62a70E0d2ed75432C3d9c1F997a122eE976a0` |
+| Contract | `0x891548f5268FA27B68553eb4841f9246b38A16fA` |
 | CDM package | `@dw3labs/rainbow-leaderboard` |
 | Chain | Paseo Asset Hub, EVM chain id `420420417` |
 | ETH-RPC (reads) | `https://paseo-assethub-rpc.laissez-faire.trade` |
 | Substrate RPC (writes) | `wss://asset-hub-paseo-rpc.n.dwellir.com` |
 | Owner | `0x50AFf5a51BE03d5914D9b5A42c548Dc35A73f7D8` |
 | `epochSeconds` / `maxSessionsPerEpoch` | 3600 / 12 |
-| Game 1 `rulesHash` | `0x229be8b7…bd479c` — retired: the falling-orb strawman |
-| Game 2 `rulesHash` | `0x02bdb80f…bd049b` = `keccak256(sim.wasm)` — the platformer |
+| Game 2 `rulesHash` | `0x02bdb80f…bd049b` = `keccak256(sim.wasm)` — the platformer, and the only board registered here |
 | `sim.wasm` (game 2) | 33,599 bytes, ABI version 2 |
 | Product app | `dw3labsgame.dot` — https://dw3labsgame.dev-dot.li |
-| App bundle CID | `bafybeidqf55pspcifnwwi5sg3kzpp2ydq5viiv3mo5hzjcz5sb2kpzj44u` (2026-07-30) |
+| App bundle CID | `bafybeigw5zxqdeqdwklpttxxbzqa325u47exxcyahz7yz76cw6gqycf6d4` (2026-07-30, block 11596472) |
 | Network flag | `VITE_NETWORK` — `devnet` (default), `paseo`, `polkadot` |
 | Verifier | `https://rainbow-verifier.dw3labs.work` — baked in as the default |
-| Registered verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (Acurast `380403`, reused unchanged by `380404`) |
+| Registered verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (Acurast `380403`; reused unchanged by `380404`, `380405`, `380406`) |
 
 > **A new ruleset is a new `gameId`, never a mutated hash.** `gameRules` is write-once by
 > design (defect D3): scores earned under one set of physics must not share a board with
-> scores earned under another. Game 1's board still exists and is still valid; it is simply
-> closed. The contract did **not** need redeploying for this.
+> scores earned under another.
+>
+> Game 1 (`0x229be8b7…`, the falling-orb strawman) lives on the **previous** deployment
+> `0x9cc62a70…` and is not registered on this one — no verifier serves that ruleset any more.
+> Retiring a ruleset never needed a redeploy; adding the board's enumeration did. See
+> [deployment-devnet.md](deployment-devnet.md).
 
 ---
 
