@@ -5,8 +5,10 @@
 // build a transaction. So the manager is owned here directly, which is also the
 // shape the SDK's own contract examples use.
 
-import { DevProvider, SignerManager } from "@parity/product-sdk/wallet";
+import { DevProvider, HostProvider, SignerManager } from "@parity/product-sdk/wallet";
 import { useSyncExternalStore } from "react";
+
+import { CONTRACT_ACCOUNT_INDEX, PRODUCT_NAME } from "./network";
 
 /**
  * The host manager: the real path, used whenever the app runs as a Product.
@@ -14,8 +16,49 @@ import { useSyncExternalStore } from "react";
  * One module-level instance. Connection state and the selected account are
  * genuinely global, and a per-component manager would open competing host
  * connections.
+ *
+ * ## The account this returns is the *product* account, and it must be named
+ *
+ * `HostProvider.connect()` does not enumerate the user's own wallet accounts —
+ * there is no legacy-account path in this SDK version at all. It returns
+ * exactly one account: the one the host derives for a given
+ * `dotNsIdentifier`. That is per-user *and* per-app, so it is the right thing
+ * for a leaderboard to credit, and it is the same account `submit.ts` sends
+ * the transaction from.
+ *
+ * This was previously `{ dappName: "Rainbow" }`, and the failure it caused is
+ * worth recording. `dappName` is not a label: the provider runs it through
+ * `productIdentifierFromDappName`, which appends `.dot`, and then asks the host
+ * to derive `Rainbow.dot`. This Product is published as `dw3labsgame.dot`, so
+ * the host refused — and the refusal path for `dappName` **resolves with an
+ * empty accounts list instead of an error**. The app then reported "no
+ * accounts returned" while Polkadot Desktop was sitting there with a perfectly
+ * good account, and after the guest tier landed it silently showed a guest.
+ *
+ * So the identifier is `PRODUCT_NAME`, and it is passed as an explicit
+ * `productAccount` rather than via `dappName`. That is the loud path: a
+ * derivation the host rejects comes back as an `err` carrying the host's own
+ * message, instead of an empty list that every caller has to guess about.
+ * Same reasoning as `SdkGate` — a false negative here is silent and permanent.
+ *
+ * `dappName` is still set, because `SignerManager` also uses it to namespace
+ * the persisted selected-account key.
+ *
+ * `requestName: false` because nothing here displays an account name, and
+ * fetching one calls `getUserId()`, which raises a host identity prompt the
+ * player has no reason to be shown.
  */
-const hostManager = new SignerManager({ dappName: "Rainbow" });
+const hostManager = new SignerManager({
+  dappName: PRODUCT_NAME,
+  createProvider: () =>
+    new HostProvider({
+      productAccount: {
+        dotNsIdentifier: PRODUCT_NAME,
+        derivationIndex: CONTRACT_ACCOUNT_INDEX,
+        requestName: false,
+      },
+    }),
+});
 
 /**
  * Development fallback — **dev builds only**.
@@ -109,6 +152,28 @@ async function tryConnect(manager: SignerManager): Promise<Error | null> {
   } catch (e) {
     return e instanceof Error ? e : new Error(String(e));
   }
+}
+
+/**
+ * Connect the host, and only the host.
+ *
+ * For the automatic attempt on load. Inside a Product the account already
+ * exists — the host has it — so waiting for someone to press Connect before
+ * asking for it means the app spends its first screen claiming there is no
+ * account when there is one. Since the guest tier landed that is worse than
+ * cosmetic: the app does not merely look unconnected, it *behaves* as a guest,
+ * pinned to the in-tab enclave with submitting switched off.
+ *
+ * Deliberately not `connectWallet`. The dev fallback must never be reached
+ * without a press: silently signing a player in as `//Alice` because a host
+ * handshake failed is the failure this file already refuses to make.
+ */
+export async function connectHost(): Promise<Error | null> {
+  const error = await tryConnect(hostManager);
+  if (error) return error;
+  active = hostManager;
+  mode = "host";
+  return null;
 }
 
 /** Connect: the Product host if there is one, otherwise dev accounts. */

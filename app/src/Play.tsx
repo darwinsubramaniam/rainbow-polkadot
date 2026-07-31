@@ -16,7 +16,7 @@ import { addressOf } from "./chain/leaderboard";
 import { GAME_ID } from "./chain/network";
 import { useBoard } from "./chain/useBoard";
 import { markLanded, remember, type RunRecord } from "./chain/history";
-import { connectWallet, useSignerState } from "./chain/wallet";
+import { connectHost, connectWallet, useSignerState } from "./chain/wallet";
 import { useProcessorHealth, type Health } from "./chain/health";
 import { Hud } from "./ui/Hud";
 import { TouchPad } from "./ui/TouchPad";
@@ -217,6 +217,21 @@ export function Play() {
     announced.current = true;
     say(`no Polkadot host: ${standaloneReason.value}`, "info");
     say("running standalone — play and attestation work, on-chain submit does not.", "info");
+  }, [app, say]);
+
+  // Ask the host for its account as soon as we know there is a host.
+  //
+  // Only when `app` is set, so this never runs outside a container and the dev
+  // fallback still needs a press. Guarded by a ref rather than by
+  // `walletPlayer`, so a host that legitimately has no account is asked once
+  // and not on a loop.
+  const askedHost = useRef(false);
+  useEffect(() => {
+    if (!app || askedHost.current) return;
+    askedHost.current = true;
+    void connectHost().then((e) => {
+      if (e) say(`host has no account for this Product yet: ${e.message}`, "info");
+    });
   }, [app, say]);
 
   // Say what a guest is, once, on entering the tier — not once per mount.
