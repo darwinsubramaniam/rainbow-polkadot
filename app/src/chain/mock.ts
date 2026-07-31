@@ -12,11 +12,15 @@
 // public, so anyone could produce the same "attestation" for any score, and the
 // contract's `isVerifier` set does not contain it. `Play` never submits one.
 //
-// It is reached through a dynamic `import()` behind `import.meta.env.DEV`, which
-// Vite replaces with `false` at build time — so this file, and the checks it
-// would otherwise mislead a reader into trusting, stay out of the published
-// bundle. That matters beyond tidiness: the bundle is uploaded to the Bulletin
-// chain against a byte quota.
+// It used to sit behind `import.meta.env.DEV` and stay out of a build entirely.
+// It no longer does — `Play` explains why — so this file *does* ship, as its own
+// chunk behind a dynamic `import()`. It is downloaded only when a player turns
+// the simulator on, which keeps it off the critical path and off the Bulletin
+// byte quota for everyone who never asks for it.
+//
+// What keeps it harmless is not absence but the key: the one below is printed in
+// this repository, so the contract's `isVerifier` set does not contain it and
+// `Play` never submits what it signs.
 
 // @noble v2 publishes explicit ".js" subpath exports; the extensionless form
 // does not resolve.

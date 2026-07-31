@@ -67,6 +67,7 @@ shop for an easy one: `maxSessionsPerEpoch` caps you at twelve per hour.
 |---|---|
 | [DEVELOPER-GUIDE](docs/DEVELOPER-GUIDE.md) | **read this first** |
 | [end-to-end](docs/end-to-end.md) | the working run and what it proves |
+| [host API conformance](docs/host-api-conformance.md) | every chain call, and the host call it makes |
 | [deployment-devnet](docs/deployment-devnet.md) | deploying, `cdm` vs `forge create` |
 | [E0.2 determinism](docs/E0.2-determinism.md) | why replay is bit-identical |
 | [E0.1 product sandbox](docs/E0.1-product-sandbox.md) | what a Product may do |

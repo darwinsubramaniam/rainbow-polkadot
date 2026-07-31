@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 // Call a PolkaVM contract on Asset Hub as the *Substrate* account.
 //
+// **This is a Node developer CLI, not app code.** It lives outside `app/`, is in
+// no bundle's import graph, and opens its own WebSocket to a public RPC — which
+// the app itself never does and must never do. A scanner grepping the repo for
+// direct chain access will land here first; `docs/host-api-conformance.md`
+// records why that is a false positive.
+//
 // Two things make this necessary rather than reaching for `cast`:
 //
 // 1. `pallet-revive` gives a Substrate account a **mapped** H160. This contract's

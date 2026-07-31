@@ -6,8 +6,9 @@
   "description": "Rainbow — a TEE-attested platformer, packaged as a Polkadot Product.",
   "scripts": {
     "sync-wasm": "node scripts/sync-wasm.mjs",
+    "check-bundle": "node scripts/check-bundle.mjs",
     "dev": "npm run sync-wasm && vite",
-    "build": "npm run sync-wasm && tsc -b && vite build",
+    "build": "npm run sync-wasm && tsc -b && vite build && npm run check-bundle",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test": "node --test \"src/**/*.test.ts\""

@@ -54,6 +54,19 @@ const MAX_ROWS = 200;
 async function readHandle(app: App) {
   // Cached by the SDK, so calling it per refresh costs nothing after the first.
   await app.chain.connect({ assetHub: ASSET_HUB });
+
+  // "Raw" here means untyped, not un-hosted — the name invites the opposite
+  // reading, and a review did read it that way. `product-sdk-chain-client`:
+  // "Connections route through the host provider … there is no direct-WebSocket
+  // fallback." This client is the host's; there is no other kind to get.
+  //
+  // It also has to be this one rather than the typed API from `getClient`.
+  // `createContractFromClient` builds on `createContractRuntimeFromClient`,
+  // which the SDK says to "use on every production code path that calls a
+  // contract's .tx() or .query() against a live chain" — because it routes the
+  // dry-run through `getUnsafeApi()`. The typed factory is documented as being
+  // for tests, and "susceptible to `Incompatible runtime entry` errors on a
+  // live chain whose descriptor lags". Ours will lag eventually.
   const client = app.chain.getRawClient(ASSET_HUB);
   return createContractFromClient(
     client,

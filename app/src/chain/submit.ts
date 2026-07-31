@@ -67,6 +67,8 @@ async function contractHandle(app: App) {
   // Idempotent: connections are cached by the SDK, so calling this per submit
   // costs nothing after the first.
   await app.chain.connect({ assetHub: ASSET_HUB });
+  // Host-lent and untyped, not un-hosted, and required rather than chosen —
+  // see the note on the same call in `board.ts`.
   const client = app.chain.getRawClient(ASSET_HUB);
   const account = await contractAccount();
 
