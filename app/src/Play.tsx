@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ProductSDKContext } from "@parity/product-sdk/react";
 
 import { useGame } from "./game/useGame";
@@ -11,6 +11,7 @@ import {
   type SessionRecord,
 } from "./chain/attempts";
 import { playerAddress, submitAttestation } from "./chain/submit";
+import { resolveMode, type Slot, type Tier } from "./chain/mode";
 import { addressOf } from "./chain/leaderboard";
 import { GAME_ID } from "./chain/network";
 import { useBoard } from "./chain/useBoard";
@@ -99,25 +100,12 @@ export function Play() {
   // The H160 pallet-revive maps this account to. It is what the contract
   // credits AND what the enclave hashes into sessionId, so it must be derived
   // identically on both sides.
-  const player = account ? playerAddress(account.address) : null;
+  const walletPlayer = account ? playerAddress(account.address) : null;
 
   // Persisted, because a player who turned the sound off meant it. Applied to
   // the sound module by the effect below rather than passed down, so toggling
   // it mid-run re-renders nothing that the game loop touches.
   const [muted, setMuted] = useStoredJson("rainbow.muted", false);
-
-  const mountRef = useRef<HTMLDivElement | null>(null);
-  // The address is passed for one reason only: it picks which of the pack's
-  // five characters the player is drawn as, so a returning player is the same
-  // character every time. It reaches nothing that is attested.
-  const game = useGame(mountRef, player);
-
-  // Also depends on `ready`: the preference is set before the audio has
-  // finished loading, and would otherwise be dropped on the floor.
-  const applyMuted = game.setMuted;
-  useEffect(() => {
-    applyMuted(muted);
-  }, [muted, game.ready, applyMuted]);
 
   // The URL persists as it is edited, so a reload does not cost the user a
   // pasted tunnel hostname. There was previously a separate uncommitted draft,
@@ -144,23 +132,59 @@ export function Play() {
   // to reach the leaderboard.
   const [simulated, setSimulated] = useStoredJson("rainbow.simulate", false);
   const [sim, setSim] = useState<Enclave | null>(null);
-  const simulating = simulated;
 
-  // One session record per enclave. A seed the simulator issued means nothing
-  // to the deployed one — each derives its own from its own key — so a held run
-  // must never be replayed or attested against the other, and the attempt
-  // budgets are likewise unrelated. Separate slots are what make flipping the
-  // switch safe rather than a source of mystifying score disagreements.
-  const liveRecord = useStoredJson<SessionRecord | null>("rainbow.session", null);
-  const simRecord = useStoredJson<SessionRecord | null>("rainbow.session.sim", null);
-  const [record, setRecord] = simulating ? simRecord : liveRecord;
+  // Everything the rest of this component is allowed to do, in one value.
+  //
+  // Read `chain/mode.ts` before adding a capability check anywhere below. The
+  // tiers are enumerated there precisely so that "can this submit", "does this
+  // player have an on-chain record" and "which storage slot is this" cannot
+  // drift apart from each other, which is what happens when each question is
+  // answered locally at the point it is asked.
+  const mode = useMemo(
+    () => resolveMode({ walletPlayer, simulatorOn: simulated, hasHost: !!app }),
+    [walletPlayer, simulated, app],
+  );
+  const player = mode.player;
+  const simulating = mode.enclave === "simulated";
 
-  // Your runs, split by enclave for the same reason the session records are: a
-  // score signed by the dev key in the source can never land, and listing it
-  // beside real ones under the same "best 10" heading would claim otherwise.
-  const liveHistory = useStoredJson<RunRecord[]>("rainbow.history", []);
-  const simHistory = useStoredJson<RunRecord[]>("rainbow.history.sim", []);
-  const [history, setHistory] = simulating ? simHistory : liveHistory;
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  // The address is passed for one reason only: it picks which of the pack's
+  // five characters the player is drawn as, so a returning player is the same
+  // character every time. It reaches nothing that is attested — which is why a
+  // guest address does the job here as well as a real one does.
+  const game = useGame(mountRef, player);
+
+  // Also depends on `ready`: the preference is set before the audio has
+  // finished loading, and would otherwise be dropped on the floor.
+  const applyMuted = game.setMuted;
+  useEffect(() => {
+    applyMuted(muted);
+  }, [muted, game.ready, applyMuted]);
+
+  // One session record and one run list per tier, keyed by `mode.slot`.
+  //
+  // A seed the simulator issued means nothing to the deployed one — each
+  // derives its own from its own key — and a guest's means nothing to either,
+  // since it is bound to an address no wallet controls. A held run must never
+  // be replayed or attested across that line, and the attempt budgets are
+  // likewise unrelated. Separate slots are what make changing tier safe rather
+  // than a source of mystifying score disagreements.
+  //
+  // All three hooks run on every render, because hooks must; the tier only
+  // picks which pair is in use. That also means switching tier switches the
+  // session and the history together, never one without the other.
+  const recordSlots: Record<Slot, ReturnType<typeof useStoredJson<SessionRecord | null>>> = {
+    "": useStoredJson<SessionRecord | null>("rainbow.session", null),
+    ".sim": useStoredJson<SessionRecord | null>("rainbow.session.sim", null),
+    ".guest": useStoredJson<SessionRecord | null>("rainbow.session.guest", null),
+  };
+  const historySlots: Record<Slot, ReturnType<typeof useStoredJson<RunRecord[]>>> = {
+    "": useStoredJson<RunRecord[]>("rainbow.history", []),
+    ".sim": useStoredJson<RunRecord[]>("rainbow.history.sim", []),
+    ".guest": useStoredJson<RunRecord[]>("rainbow.history.guest", []),
+  };
+  const [record, setRecord] = recordSlots[mode.slot];
+  const [history, setHistory] = historySlots[mode.slot];
 
   const [session, setSession] = useState<Active | null>(null);
   const [enclave, setEnclave] = useState<Identity | null>(null);
@@ -175,7 +199,10 @@ export function Play() {
   // when the player asks. A view call is a dry-run, not a subscription, so
   // nothing tells the app that someone else's run went on-chain.
   const [boardKey, setBoardKey] = useState(0);
-  const board = useBoard(app ?? null, GAME_ID, player, boardKey);
+  // A guest address has no on-chain record to look up, and asking for one would
+  // spend a dry-run to be told zero. The top of the board is still read — it is
+  // public, and worth seeing before you decide to connect anything.
+  const board = useBoard(app ?? null, GAME_ID, mode.hasOnChainRecord ? player : null, boardKey);
 
   const say = useCallback((text: string, kind: LogKind = "info") => {
     setLines((l) => [...l.slice(-60), { kind, text }]);
@@ -192,11 +219,31 @@ export function Play() {
     say("running standalone — play and attestation work, on-chain submit does not.", "info");
   }, [app, say]);
 
+  // Say what a guest is, once, on entering the tier — not once per mount.
+  //
+  // A guest is dropped into a working game with no ceremony, which is the
+  // point, but silence would leave them to discover the limits by hitting
+  // them. The ref holds the tier last announced, so connecting an account and
+  // disconnecting again says it again, while a re-render does not.
+  const saidTier = useRef<Tier | null>(null);
+  useEffect(() => {
+    if (saidTier.current === mode.tier) return;
+    const first = saidTier.current === null;
+    saidTier.current = mode.tier;
+    if (mode.tier !== "guest") {
+      if (!first) say(`account connected — ${mode.summary}`, "ok");
+      return;
+    }
+    say("playing as a guest — no account, so nothing here can reach the chain", "info");
+    say("the enclave runs in this tab: real seeds, real replay, real signature, nothing submitted.", "info");
+    say("connect an account to play against the deployed enclave and land a score.", "info");
+  }, [mode.tier, mode.summary, say]);
+
   // Pull the simulator in only when it is actually switched on. Still a
   // dynamic import: it is now reachable from a build, but the overwhelming
   // majority of visits never touch it, and they should not pay to download it.
   useEffect(() => {
-    if (!simulated || sim) return;
+    if (!simulating || sim) return;
 
     let live = true;
     void import("./chain/mock")
@@ -209,7 +256,7 @@ export function Play() {
     return () => {
       live = false;
     };
-  }, [simulated, sim, say]);
+  }, [simulating, sim, say]);
 
   const connecting = signer.status === "connecting";
 
@@ -221,7 +268,12 @@ export function Play() {
   // not passing null here: someone who switched the simulator on because the
   // job was down needs to be told when it comes back, or they will sit in the
   // simulator indefinitely posting scores that can never land.
-  const health = useProcessorHealth(verifier.trim() || null);
+  //
+  // Not probed for a guest, who has nothing to switch back to. Sending a
+  // request every quarter hour to a Processor they cannot use would be traffic
+  // spent to fill in a diagram box. `mode.probesProcessor` is the one line to
+  // change if that judgement turns out to be wrong.
+  const health = useProcessorHealth(mode.probesProcessor ? verifier.trim() || null : null);
 
   // Said once per transition, so the log carries the same story the diagram
   // does. The ref holds the last status announced: without it every re-render
@@ -268,7 +320,11 @@ export function Play() {
   const play = useCallback(async () => {
     const api = endpoint();
     if (!api) return say(notReady(), "bad");
-    if (!player) return say("connect a wallet first — the seed is bound to your address", "bad");
+    // No wallet check here any more. `mode.player` is always an address — a
+    // guest's if there is no account — and the guest tier is pinned to the
+    // in-tab enclave, so there is nothing left that a missing wallet could
+    // break at this point. What a guest cannot do is submit, and that is
+    // checked where submitting happens.
     if (next.mode === "exhausted") {
       return say(`no runs left this hour — ${minutesToReset()} min until they reset`, "bad");
     }
@@ -325,7 +381,7 @@ export function Play() {
   const finish = useCallback(async () => {
     const api = endpoint();
     if (!api) return say(notReady(), "bad");
-    if (!session || !game.result || !player || !enclave) return;
+    if (!session || !game.result || !enclave) return;
 
     // Local, not `busy`: the catch below needs to know which step threw, and
     // the state read inside this closure is the one captured at render.
@@ -363,21 +419,26 @@ export function Play() {
       });
       setHistory(attested);
 
-      // A simulated attestation is signed by a key printed in the source. The
-      // contract's verifier set does not contain it, so submitting would spend
-      // a transaction to be told what is already known — and, worse, would let
-      // the rail claim an on-chain step the simulator cannot honestly reach.
-      if (simulating) {
-        say("simulated enclave — stopping before submit. This signature is from a dev key", "info");
-        say("the contract does not trust; switch the simulator off to land a real score.", "info");
+      // The one gate, asked once. Every reason a run cannot reach the contract
+      // — guest identity, simulated enclave, no host — is already decided in
+      // `mode`, and re-deriving any of them here is how the three drift apart.
+      //
+      // Each reason matters for the same underlying purpose: a submit that
+      // cannot succeed would spend a transaction to be told what is already
+      // known, and would let the rail claim an on-chain step the run never
+      // honestly reached.
+      if (!mode.canSubmit) {
+        say(`stopping before submit — ${mode.blockedReason ?? "this run cannot be submitted"}`, "info");
+        if (mode.tier === "live") {
+          // The attestation is real and still worth something without a host.
+          say("the attestation below is valid and can be landed from the CLI.", "info");
+        }
         return;
       }
 
-      if (!app) {
-        say("no host — stopping before submit. The attestation below is valid and", "info");
-        say("can be landed from the CLI with scripts/serve-game.mjs.", "info");
-        return;
-      }
+      // Narrowing, not a second gate: `canSubmit` is only ever true when a host
+      // is present, and TypeScript cannot see that through the Mode type.
+      if (!app) return;
 
       stage = 6;
       setBusy("submit");
@@ -417,6 +478,7 @@ export function Play() {
     sim,
     session,
     game.result,
+    mode,
     player,
     enclave,
     app,
@@ -435,6 +497,16 @@ export function Play() {
    * that looks like a cheat rather than a mismatch of endpoints.
    */
   const toggleSimulation = useCallback(() => {
+    // A guest is pinned to the in-tab enclave, so flipping the stored
+    // preference here would change nothing visible and read as a broken
+    // button. Say why instead. The preference is still recorded, so it takes
+    // effect the moment an account is connected.
+    if (mode.tier === "guest") {
+      setSimulated(!simulated);
+      say("playing as a guest, so the enclave stays in this tab — connect an account to reach the deployed one.", "info");
+      return;
+    }
+
     const on = !simulated;
     setSimulated(on);
     setSession(null);
@@ -448,7 +520,7 @@ export function Play() {
         : "back to the deployed enclave at the URL above",
       "info",
     );
-  }, [simulated, setSimulated, say]);
+  }, [simulated, setSimulated, mode.tier, say]);
 
   const connect = useCallback(() => {
     connectWallet()
@@ -475,7 +547,7 @@ export function Play() {
   // them is actually reachable.
 
   /** Nothing left to do with this run: it is attested, and either landed or unlandable. */
-  const attestSettled = attestation !== null && (landed || simulating || !app);
+  const attestSettled = attestation !== null && (landed || !mode.canSubmit);
 
   const attestLabel =
     busy === "attest"
@@ -486,9 +558,11 @@ export function Play() {
           ? "On the leaderboard"
           : attestSettled
             ? "Attested"
-            : simulating
-              ? "Attest (simulated)"
-              : "Attest & submit";
+            : mode.canSubmit
+              ? "Attest & submit"
+              : mode.tier === "guest"
+                ? "Attest (guest)"
+                : "Attest (simulated)";
 
   const playLabel =
     busy === "session"
@@ -694,10 +768,11 @@ export function Play() {
                 player={player}
                 onConnect={connect}
                 connecting={connecting}
-                where={simulating ? "simulated enclave" : app ? "polkadot host connected" : "standalone — no host"}
+                where={mode.summary}
                 verifier={verifier}
                 onVerifier={setVerifier}
-                simulated={simulated}
+                simulated={simulating}
+                simulationForced={mode.tier === "guest"}
                 onToggleSimulation={toggleSimulation}
                 lines={lines}
                 attestation={attestation}
@@ -721,8 +796,12 @@ export function Play() {
           {wide ? (
             <ProofFlow
               steps={steps}
-              address={player ? short(player) : null}
+              // A guest's address is a shared placeholder, not theirs. Drawing
+              // it here would turn step one into a claim that an account is
+              // connected, which is exactly the step that has not happened.
+              address={mode.isGuest ? null : short(player)}
               verifier={simulating ? null : verifier}
+              simulationForced={mode.tier === "guest"}
               health={health.status}
               simulated={simulating}
               onToggleSimulation={toggleSimulation}
@@ -752,6 +831,7 @@ export function Play() {
             you={player}
             onChainBest={board.yourBest}
             simulated={simulating}
+            guest={mode.isGuest}
           />
         </div>
       </div>

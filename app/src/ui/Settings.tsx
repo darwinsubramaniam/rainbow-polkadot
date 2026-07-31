@@ -23,8 +23,13 @@ interface Props {
   verifier: string;
   onVerifier: (value: string) => void;
 
-  /** Development only, and compiled out of a build along with the simulator. */
+  /** Whether the enclave is currently answering from this tab. */
   simulated: boolean;
+  /**
+   * True when the tier leaves no choice — a guest has no account to reach the
+   * deployed enclave with, so the switch reports the state rather than setting it.
+   */
+  simulationForced: boolean;
   onToggleSimulation: () => void;
 
   lines: readonly Line[];
@@ -59,6 +64,7 @@ export function Settings({
   verifier,
   onVerifier,
   simulated,
+  simulationForced,
   onToggleSimulation,
   lines,
   attestation,
@@ -116,9 +122,19 @@ export function Settings({
               <span>{player ? short(player) : "—"}</span>
             </span>
           ) : (
-            <button className="ghost" onClick={onConnect} disabled={connecting}>
-              {connecting ? "Connecting…" : "Connect wallet"}
-            </button>
+            // Deliberately no address. A guest does have one — the enclave
+            // needs an H160 to derive a seed from — but it is a shared
+            // constant, not something anyone holds, and rendering it here as a
+            // truncated `0x…` under the heading "Account" would say the
+            // opposite. The word is the honest answer to "whose runs are
+            // these": nobody's, until you connect something.
+            <span className="identity">
+              <span>Guest</span>
+              <span className="arrow">— no account, nothing can be submitted</span>
+              <button className="ghost" onClick={onConnect} disabled={connecting}>
+                {connecting ? "Connecting…" : "Connect wallet"}
+              </button>
+            </span>
           )}
         </div>
 
@@ -142,12 +158,14 @@ export function Settings({
             <span className="label">Development</span>
             <div className="dev-row">
               <button className="ghost" onClick={onToggleSimulation} aria-pressed={simulated}>
-                {simulated ? "Simulator: on" : "Simulate the enclave"}
+                {simulationForced ? "Simulator: on (guest)" : simulated ? "Simulator: on" : "Simulate the enclave"}
               </button>
               <span className="hint">
-                {simulated
-                  ? "Seeds, replay and the EIP-712 signature are computed here, by a key that is in the source. Play and attest work with nothing deployed; submitting is refused."
-                  : "Runs the verifier in this tab so play and attest work without an Acurast job or a tunnel."}
+                {simulationForced
+                  ? "A guest has no account to open a session with the deployed enclave, so this one is not a choice. Connect an account to reach the real Processor."
+                  : simulated
+                    ? "Seeds, replay and the EIP-712 signature are computed here, by a key that is in the source. Play and attest work with nothing deployed; submitting is refused."
+                    : "Runs the verifier in this tab so play and attest work without an Acurast job or a tunnel."}
               </span>
             </div>
           </div>

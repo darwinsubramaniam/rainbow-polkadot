@@ -394,6 +394,7 @@ export function ProofFlow({
   verifier,
   health,
   simulated,
+  simulationForced,
   onToggleSimulation,
   onRecheck,
 }: {
@@ -405,6 +406,12 @@ export function ProofFlow({
   health: Health;
   /** Whether the enclave is currently being simulated in this tab. */
   simulated: boolean;
+  /**
+   * True when the tier gives no choice about that — a guest, who has no account
+   * to open a session with the deployed enclave. The Processor is then not
+   * probed at all, so this box must not report on it either way.
+   */
+  simulationForced: boolean;
   onToggleSimulation: () => void;
   onRecheck: () => void;
 }) {
@@ -441,8 +448,24 @@ export function ProofFlow({
    * being probed, so the moment its job is back the box can say so and offer
    * the way out. Without that, switching the simulator on is a one-way door —
    * the app stops asking, and the player has no reason to ever switch it off.
+   *
+   * **Memoised, and it has to be.** `actions` is an array literal, so an
+   * unmemoised version returns a fresh reference on every render. That
+   * reference is a dependency of `nodes` below, and `Play` re-renders ten times
+   * a second while a run is going — the HUD sample. So the node array was being
+   * rebuilt at 10 Hz for the whole length of every run, and the diagram
+   * flickered from the first frame of play to the last.
    */
-  const processor: { tone: Health; text: string; actions: Action[] } = simulated
+  const processor: { tone: Health; text: string; actions: Action[] } = useMemo(() => {
+    // A guest never probes the Processor, so this box must not claim it is
+    // down. Saying "still down" about a machine nobody looked at is the same
+    // class of mistake as claiming a step reached the chain: it reads as a
+    // measurement and is not one.
+    if (simulationForced) {
+      return { tone: "unknown", text: "Processor: not checked", actions: [] };
+    }
+
+    return simulated
     ? {
         tone: health === "online" ? "online" : "unknown",
         text:
@@ -477,6 +500,7 @@ export function ProofFlow({
           ],
         }
       : { tone: health, text: HEALTH_TEXT[health], actions: [] };
+  }, [simulationForced, simulated, health, onRecheck, onToggleSimulation]);
 
   /**
    * Whether the view has been moved by hand.
@@ -525,6 +549,8 @@ export function ProofFlow({
           detail: "(Polkadot Product App)",
           detailMark: <PolkadotMark />,
           // The address is the whole content of step one: connected or not.
+          // A guest reaches the second branch, which is the true statement —
+          // they are playing, and no account is connected.
           note: address ? `Account · ${address}` : "Account · not connected",
           state: account,
           side: "app",
@@ -585,9 +611,7 @@ export function ProofFlow({
       tunnelLabel,
       tunnelHost,
       simulated,
-      processor.tone,
-      processor.text,
-      processor.actions,
+      processor,
     ],
   );
 

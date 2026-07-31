@@ -9,6 +9,8 @@ interface Props {
   onChainBest: bigint | null;
   /** True while the simulator is answering, which makes these runs unlandable. */
   simulated: boolean;
+  /** True when these runs belong to a guest identity, which has no on-chain record. */
+  guest: boolean;
 }
 
 const when = (at: number): string =>
@@ -27,7 +29,7 @@ const when = (at: number): string =>
  * A row that landed is marked, because that is the difference between a run that
  * happened and a run the chain accepted.
  */
-export function YourRuns({ history, you, onChainBest, simulated }: Props) {
+export function YourRuns({ history, you, onChainBest, simulated, guest }: Props) {
   const runs = personalBest(history, you);
 
   return (
@@ -37,9 +39,11 @@ export function YourRuns({ history, you, onChainBest, simulated }: Props) {
         <span className="note">
           {onChainBest !== null && onChainBest > 0n
             ? `on-chain best ${String(onChainBest)}`
-            : simulated
-              ? "simulated"
-              : "this device"}
+            : guest
+              ? "guest — this device only"
+              : simulated
+                ? "simulated"
+                : "this device"}
         </span>
       </div>
 

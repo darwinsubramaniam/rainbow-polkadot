@@ -730,17 +730,90 @@ A Product gets its signer and chain RPC from the host. Outside one, `ProductSDKP
 throws `Host storage unavailable` — and since it sits above the whole tree, that takes the
 game down with it.
 
-`app/src/SdkGate.tsx` asks **`isInsideContainer()`** from `@parity/product-sdk/host`, then
-mounts the provider only when there is a host, with an error boundary behind it.
+`app/src/SdkGate.tsx` **does not ask**. It calls `createApp` and treats only its rejection as
+absence, because the failure is asymmetric: a false negative is silent and permanent — the app
+quietly drops its one privileged capability and nothing looks broken — while a false positive
+is immediate and legible.
 
-> **Do not infer the host from the frame.** An earlier version used
-> `window.self !== window.top`, reasoning that a Product is delivered into a cross-origin
-> iframe — which E0.1 did measure, but only on the *web gateway*. **Polkadot Desktop loads
-> the app top-level**, so that check reported "no host" inside a real host and silently
-> disabled submitting, with no error to explain it.
+> **Two predicates were tried and both were wrong in the expensive direction.** The first
+> inferred from `window.self !== window.top`, reasoning that a Product is delivered into a
+> cross-origin iframe — which E0.1 did measure, but only on the *web gateway*. **Polkadot
+> Desktop loads the app top-level**, so it reported "no host" inside a real host and silently
+> disabled submitting. The second asked `isInsideContainer()`, which outside an iframe is one
+> synchronous look for a marker the host injects; asked once on mount, that is a race.
 
-Without a host the app still plays and still gets scores attested; only the on-chain submit
-is unavailable. A `DevProvider` fallback supplies dev accounts so `npm run dev` is useful.
+There is no error boundary around the children either. The old one caught *anything* thrown in
+the subtree and reported it as "no host", which is how a chain-support error came to look like
+a missing host for as long as it did.
+
+Without a host the app still plays and still gets scores attested; only the on-chain submit is
+unavailable. In a **dev build** a `DevProvider` fallback supplies dev accounts so `npm run dev`
+is useful — it is gated on `import.meta.env.DEV` and a published Product contains no
+construction of it at all, for reasons set out in
+[host API conformance](host-api-conformance.md).
+
+### Three tiers, and what each one may do
+
+Two switches decide what a run is: whether a wallet is connected, and where the enclave
+answers from. Their consequences used to be spread through `Play.tsx` as a scattering of
+`if (simulating)` and `if (!player)` checks, which is survivable with two combinations and
+not with three. `app/src/chain/mode.ts` enumerates them instead, and everything downstream
+asks it rather than re-deriving:
+
+| Tier | Identity | Enclave | Submits | Slot |
+|---|---|---|---|---|
+| `guest` | none — a placeholder | in this tab | no | `.guest` |
+| `practice` | connected wallet | in this tab | no | `.sim` |
+| `live` | connected wallet | deployed Acurast job | yes, with a host | *(none)* |
+
+**Capability comes only from the tier.** There is no path where a caller assembles its own
+combination. "Guest, but against the real verifier" would burn one of that address's twelve
+attempts an hour to obtain a seed for a run nobody can ever submit; "simulated, but
+submitting" would ask the contract to accept a signature from a key printed in this
+repository. Neither state is reachable because neither is enumerated.
+
+**A guest is not an error state.** Someone who opens the app with nothing connected gets the
+in-tab enclave and plays — the whole machine, steps 1–5, with no wallet and no deployed job.
+That is what the tier is for. The simulator switch is deliberately not consulted for them.
+
+**The guest address is a constant**, `0x6775657374…` — `guest` in ASCII, rest zeroed:
+
+```ts
+export const GUEST_PLAYER = "0x6775657374000000000000000000000000000000";
+```
+
+Some address has to exist, because `sessionId` is `keccak256(player, epoch, k)` and both
+`mock.ts`'s `check()` and the deployed verifier reject anything that is not
+`/^0x[0-9a-fA-F]{40}$/`. Nothing requires it to be unique. An earlier version minted a random
+one per browser, which bought a per-guest level and a per-guest character and cost something
+worth more than both: a generated `0x…` rendered under the heading "Account" is
+indistinguishable from a wallet, and a guest reading it has been told something false about
+what they hold. The consequence of the constant, stated plainly, is that **every guest in a
+given hour plays the same level at the same attempt index**. For a tier whose purpose is to
+show the machine working, that is a fair trade.
+
+Nothing shows a guest an address. The Session panel says `Guest — no account, nothing can be
+submitted`, and step one of the trace diagram says `Account · not connected`, which is the
+true statement about the step that has not happened.
+
+**Sessions and runs are separated per tier**, by the `slot` suffix above. A seed the simulator
+issued means nothing to the deployed one, and a guest's means nothing to either; replaying one
+against another produces a score mismatch that looks exactly like a cheat. Changing tier
+switches the held session and the run list together, never one without the other.
+
+`resolveMode` is pure and total — it touches no storage and no clock — so the whole domain is
+eight states and `mode.test.ts` enumerates all of them. The invariants worth knowing are there
+rather than here: only `live` can ever submit, a guest is always pinned to the in-tab enclave,
+every tier gets a distinct slot, and a refusal always carries a reason.
+
+> **What is *not* checked is individual movement.** The input log carries no identity, in any
+> tier. Identity binds one level up and more strongly: the seed derives from the address, so
+> the level itself is a function of who is playing, and `attest` re-derives
+> `sessionIdFor(player, epoch, k)` rather than trusting any seed it is handed. A log recorded
+> on one player's level, replayed under another's, runs against a different level entirely.
+> And the enforcement that matters is not in the client at all — a simulated attestation is
+> signed by a key the contract's `isVerifier` set does not contain, so the contract rejects it
+> whatever the UI believes. `mode.canSubmit` is convenience; the verifier set is the guarantee.
 
 ### Working without an enclave
 
@@ -750,7 +823,9 @@ that job ends, and redeploying to change one line of UI is a poor loop. (A named
 fixes the churn but not the loop: set `VITE_VERIFIER_URL` at build time and the default
 points at a hostname that outlives any one job. See `e2e/acurast-verifier/.env.example`.)
 `npm run dev` therefore offers **Simulate the enclave**, a switch in the Session panel that
-replaces the deployed verifier with `app/src/chain/mock.ts`, running in the tab.
+replaces the deployed verifier with `app/src/chain/mock.ts`, running in the tab. It is not the
+only way in: the trace diagram offers **Simulate here** whenever the Processor is measured
+offline, and the `guest` tier uses the same module without asking.
 
 It is a second implementation of `verifier.mjs`, deliberately faithful: the same
 `sessionIdFor`, the same `keccak256(sign("rainbow-seed-v1" ‖ sessionId))` seed derivation, a
@@ -762,15 +837,18 @@ What it is not is a verifier. Its key is derived from a string in the source, so
 sign anything with it; the contract's `isVerifier` set does not contain it. Two guards keep
 that from becoming confusing rather than obvious:
 
-- **It never submits.** `finish()` stops after attesting and says why. Step 6 stays idle,
-  because the simulator cannot honestly reach it.
-- **Sessions do not cross over.** Simulated runs are held under `rainbow.session.sim`,
-  separate from `rainbow.session`. The two enclaves derive different seeds for the same
-  `(player, epoch, k)`, so replaying one's held seed against the other would produce a score
-  mismatch that looks exactly like a cheat.
+- **It never submits.** `finish()` stops after attesting and says why — one gate, on
+  `mode.canSubmit`. Step 6 stays idle, because the simulator cannot honestly reach it.
+- **Sessions do not cross over.** Simulated runs are held under `rainbow.session.sim`, apart
+  from both `rainbow.session` and the guest slot — see the tier table above.
 
-The switch and the module behind it are gated on `import.meta.env.DEV` and reached through a
-dynamic `import()`, so a build drops both — which matters, given the byte quota below.
+The switch is gated on `import.meta.env.DEV` (`ui/Settings.tsx`), but the module behind it is
+not: the gate on the simulator itself was removed deliberately, so a player arriving at a dead
+Processor can still see the game. `chain/mock.ts` therefore ships, as its own chunk behind a
+dynamic `import()` — downloaded only when the simulator is switched on, so it stays off the
+critical path and off the byte quota below for everyone who never asks for it. What keeps it
+honest is its key, which is printed in this repository and is not in the contract's
+`isVerifier` set, so a simulated attestation can never be submitted.
 
 ### Choosing the network
 
@@ -953,5 +1031,6 @@ resolution as side effects.
 | `docs/E0.3-E0.4-acurast.md` | `signer_sign` semantics, tunnel |
 | `docs/deployment-devnet.md` | deployment specifics, `cdm` vs `forge create` |
 | `docs/end-to-end.md` | the working run, with negative tests |
+| `docs/host-api-conformance.md` | every chain call, and the host call it makes |
 | `contracts/README.md` | contract design, D1/D3 rationale |
 | `Goal.md` | the original design document |
