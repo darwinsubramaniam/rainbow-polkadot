@@ -926,8 +926,8 @@ Check the quota with `dotns bulletin status <ss58> --env devnet`.
 | `epochSeconds` / `maxSessionsPerEpoch` | 3600 / 12 |
 | Game 2 `rulesHash` | `0x02bdb80f…bd049b` = `keccak256(sim.wasm)` — the platformer, and the only board registered here |
 | `sim.wasm` (game 2) | 33,599 bytes, ABI version 2 |
-| Product app | `dw3labsgame.dot` — https://dw3labsgame.dev-dot.li |
-| App bundle CID | `bafybeigw5zxqdeqdwklpttxxbzqa325u47exxcyahz7yz76cw6gqycf6d4` (2026-07-30, block 11596472) |
+| Product app | `rainbow-dev.dot` — https://rainbow-dev.dev-dot.li |
+| App bundle CID | **not yet published under this name.** `bafybeigw5zxqdeqdwklpttxxbzqa325u47exxcyahz7yz76cw6gqycf6d4` (2026-07-30, block 11596472) is bound to the previous `dw3labsgame.dot` |
 | Network flag | `VITE_NETWORK` — `devnet` (default), `paseo`, `polkadot` |
 | Verifier | `https://rainbow-verifier.dw3labs.work` — baked in as the default |
 | Registered verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (Acurast `380403`; reused unchanged by `380404`, `380405`, `380406`) |

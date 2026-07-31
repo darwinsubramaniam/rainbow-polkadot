@@ -29,7 +29,7 @@
  */
 
 export default {
-  domain: "dw3labsgame.dot",
+  domain: "rainbow-dev.dot",
 
   displayName: "Rainbow",
 

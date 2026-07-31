@@ -94,8 +94,18 @@ const DEPLOYED: Partial<Record<Network, string>> = {
  * Not cosmetic: it is half of a `ProductAccountId` (`{dotNsIdentifier,
  * derivationIndex}`), so it identifies the account the host derives for us and
  * sponsors. Getting it wrong yields a different account with no allowance.
+ *
+ * Which also means **changing it is not a rename**. The host derives the
+ * account from this string, so a new name is a new account: a new address for
+ * the leaderboard to credit, no `SmartContractAllowance` until the host is
+ * asked again, and no `pallet-revive` mapping until `ensureAccountMapped`
+ * sends one. All three recover by themselves on the next submit — at the cost
+ * of two wallet prompts — but scores standing under the old name stay there,
+ * because they are keyed by the address that earned them.
+ *
+ * Moved from `dw3labsgame.dot` to `rainbow-dev.dot` on 2026-07-31.
  */
-export const PRODUCT_NAME = import.meta.env.VITE_PRODUCT_NAME ?? "dw3labsgame.dot";
+export const PRODUCT_NAME = import.meta.env.VITE_PRODUCT_NAME ?? "rainbow-dev.dot";
 
 /**
  * Derivation index of the product account that signs contract calls.

@@ -36,8 +36,8 @@ secure element, accepted by a PolkaVM contract on Asset Hub.
 
 ## Play it
 
-Published as a Polkadot Product: **[dw3labsgame.dev-dot.li](https://dw3labsgame.dev-dot.li)**,
-or `dw3labsgame.dot` inside the Polkadot app.
+Published as a Polkadot Product: **[rainbow-dev.dev-dot.li](https://rainbow-dev.dev-dot.li)**,
+or `rainbow-dev.dot` inside the Polkadot app.
 
 Or run it locally:
 

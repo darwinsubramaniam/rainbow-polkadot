@@ -29,7 +29,7 @@ import { CONTRACT_ACCOUNT_INDEX, PRODUCT_NAME } from "./network";
  * This was previously `{ dappName: "Rainbow" }`, and the failure it caused is
  * worth recording. `dappName` is not a label: the provider runs it through
  * `productIdentifierFromDappName`, which appends `.dot`, and then asks the host
- * to derive `Rainbow.dot`. This Product is published as `dw3labsgame.dot`, so
+ * to derive `Rainbow.dot`. This Product is published as `rainbow-dev.dot`, so
  * the host refused — and the refusal path for `dappName` **resolves with an
  * empty accounts list instead of an error**. The app then reported "no
  * accounts returned" while Polkadot Desktop was sitting there with a perfectly

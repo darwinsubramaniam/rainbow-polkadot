@@ -152,6 +152,11 @@ relaying is re-proven on this address too.
 
 ### And the published app reads it (CID `bafybeigw5zxqde…`)
 
+> **Historical.** This run published to `dw3labsgame.dot`, which is the name the Product held
+> at the time. It has since moved to `rainbow-dev.dot` — see the live reference in the
+> [developer guide](DEVELOPER-GUIDE.md). The record below is left as it happened; changing the
+> name in it would make a dated, block-numbered result describe a deploy that never occurred.
+
 Published with `pad ./dist dw3labsgame.dot --env devnet`, finalised at block **11596472**,
 `contenthash` verified on-chain and P2P retrieval confirmed in 266 ms. Then opened in a real
 browser — the only way, since the gateway serves a resolver shell that makes both `/` and
