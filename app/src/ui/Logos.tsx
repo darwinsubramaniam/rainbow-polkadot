@@ -90,6 +90,81 @@ export function GitHubMark() {
   );
 }
 
+/**
+ * Recentre: put the whole picture back in the frame.
+ *
+ * Four corner brackets closing on a dot — the standard "fit to view" idea
+ * rather than a house or an arrow, because that is what the button does: it
+ * does not go home, it reframes what is already there.
+ */
+export function RecentreMark() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor">
+      <g strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5.6 2H3.3A1.3 1.3 0 0 0 2 3.3v2.3" />
+        <path d="M10.4 2h2.3A1.3 1.3 0 0 1 14 3.3v2.3" />
+        <path d="M14 10.4v2.3a1.3 1.3 0 0 1-1.3 1.3h-2.3" />
+        <path d="M2 10.4v2.3A1.3 1.3 0 0 0 3.3 14h2.3" />
+      </g>
+      <circle cx="8" cy="8" r="1.7" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/**
+ * The tunnel between the app and the Processor.
+ *
+ * A tunnel mouth: an outer arch on a ground line with a second arch set inside
+ * it, which is the depth cue that stops it reading as a plain doorway. Same
+ * hairline and `currentColor` as the other two drawn glyphs here, so it takes
+ * the colour of whatever it is labelling — and, unlike the brand marks, is
+ * nobody's artwork to get wrong.
+ */
+export function TunnelMark() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor">
+      <path d="M1.2 13.4h13.6" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M2.6 13.4V8a5.4 5.4 0 0 1 10.8 0v5.4" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M6.4 13.4V9.2a1.6 1.6 0 0 1 3.2 0v4.2" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * The player.
+ *
+ * The only actor in the system that is not a machine, and the one step of the
+ * six that is *theirs* — the run itself. Head and shoulders, in the same
+ * hairline as the window below, so the rail reads as one drawing.
+ */
+export function UserMark() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor">
+      <circle cx="8" cy="5" r="2.6" strokeWidth="1.3" />
+      <path d="M2.9 14a5.1 5.1 0 0 1 10.2 0" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
+ * The machine the player is sitting at.
+ *
+ * A browser window, drawn in the line weight of the marks above rather than
+ * filled: it stands beside two brand marks in the proof rail and must not
+ * out-shout them. `currentColor` because unlike the others it is nobody's
+ * artwork — it should take the colour of whatever text it labels.
+ */
+export function DeviceMark() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor">
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5" strokeWidth="1.3" />
+      <path d="M1.75 5.75h12.5" strokeWidth="1.3" />
+      <circle cx="3.9" cy="4.25" r=".62" fill="currentColor" stroke="none" />
+      <circle cx="5.8" cy="4.25" r=".62" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function AcurastMark() {
   return (
     <svg viewBox="0 0 40.179 25.376" role="img" aria-label="Acurast" focusable="false">

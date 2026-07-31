@@ -21,6 +21,7 @@
     "@parity/product-sdk": "*",
     "@parity/product-sdk-descriptors": "^0.8.0",
     "@parity/product-sdk-tx": "^0.3.2",
+    "@xyflow/react": "^12.11.2",
     "pixi.js": "^8.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

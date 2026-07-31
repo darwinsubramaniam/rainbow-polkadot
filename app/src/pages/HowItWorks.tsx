@@ -9,6 +9,7 @@ const SECTIONS = [
   ["problem", "The problem"],
   ["flow", "How a run gets proven"],
   ["enclave", "Inside the Acurast TEE"],
+  ["job", "Who starts the Processor"],
   ["trust", "Who you have to trust"],
   ["open", "Still open"],
 ] as const;
@@ -209,6 +210,47 @@ export function HowItWorks() {
                 And the assignment strategy is <strong>Single</strong> with a pinned processor rather than{" "}
                 <strong>Competing</strong>. Competing rotates processors, and rotating processors rotates keys — every
                 rotation would silently invalidate the verifier the contract is configured with.
+              </p>
+            </section>
+
+            <section id="job">
+              <h2>Who starts the Processor — and why that is the honest gap</h2>
+              <p>
+                Everything above describes a run being <em>proven</em>. None of it describes how the machine doing the
+                proving comes to exist. That is a separate question, and today it has a much weaker answer.
+              </p>
+              <p>
+                An Acurast job is a job: it is deployed, it is matched to a Processor, it runs for a period, and then it
+                <strong> ends</strong>. Right now the job behind this game is deployed and renewed by{" "}
+                <strong>the app developer</strong>, by hand. If it lapses, or the phone drops off the network, the
+                verifier simply stops answering — and no amount of cryptography in the sections above helps, because
+                there is nothing on the other end to sign anything.
+              </p>
+              <p>
+                So the play page asks. It probes the Processor when you open the app and every fifteen minutes after
+                that, and the diagram under the game says plainly whether it is answering. When it is not, you are
+                offered the enclave <strong>simulated in your own tab</strong> — the same <code>sim.wasm</code>, the
+                same replay, the same signature format, and a signing key printed openly in this repository. That last
+                part is why a simulated run is never submitted: the contract does not know that key, and it should not.
+                It exists so the mechanism can be watched working, not so a score can be reached.
+              </p>
+
+              <div className="callout">
+                <strong>Work in progress: the contract should deploy its own job.</strong> The direction is for the
+                leaderboard contract on Asset Hub to deploy and renew the Acurast job itself, over{" "}
+                <strong>XCM</strong> — so that starting a verifier is a message from a contract rather than a person at
+                a terminal. That is being built, and is not done. Until it is, job activation is the developer&apos;s
+                responsibility and you should read it as such.
+              </div>
+
+              <p>
+                Where that leads is worth naming, because it changes the shape of the trust rather than merely
+                automating a chore. Once the contract can start jobs over XCM, activation becomes{" "}
+                <strong>permissionless</strong>: a player who finds the verifier down could pay for and deploy a fresh
+                one themselves, straight from the contract, and the contract would adopt the resulting enclave key
+                because it watched the deployment happen. No developer in the path, and no privileged{" "}
+                <code>setVerifier</code> call — which is the last remaining place where this system asks you to trust a
+                person rather than check a signature.
               </p>
             </section>
 

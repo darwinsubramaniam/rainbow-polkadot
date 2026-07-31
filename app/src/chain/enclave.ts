@@ -55,13 +55,18 @@ export interface Identity {
 
 const TIMEOUT_MS = 30_000;
 
-async function call<T>(base: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(
+  base: string,
+  path: string,
+  body?: unknown,
+  timeoutMs = TIMEOUT_MS,
+): Promise<T> {
   const url = base.replace(/\/$/, "") + path;
 
   // A tunnelled enclave on a phone can stall rather than refuse. Without a
   // deadline the UI would sit on a spinner indefinitely.
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
   try {
     const res = await fetch(url, {
@@ -76,7 +81,7 @@ async function call<T>(base: string, path: string, body?: unknown): Promise<T> {
     return json;
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`enclave did not answer within ${TIMEOUT_MS / 1000}s`);
+      throw new Error(`enclave did not answer within ${timeoutMs / 1000}s`);
     }
     throw e;
   } finally {
@@ -84,7 +89,16 @@ async function call<T>(base: string, path: string, body?: unknown): Promise<T> {
   }
 }
 
-export const identity = (base: string) => call<Identity>(base, "/identity");
+/**
+ * Who the enclave is, and — used on its own — whether it is there at all.
+ *
+ * The only call with no side effect and no arguments, which is what makes it
+ * the health probe. `timeoutMs` exists for that use: 30 seconds is the right
+ * patience for an attestation the player is waiting on, and far too long for a
+ * background liveness check that should simply conclude "not answering".
+ */
+export const identity = (base: string, timeoutMs?: number) =>
+  call<Identity>(base, "/identity", undefined, timeoutMs);
 
 /**
  * Claim a session and receive its seed.

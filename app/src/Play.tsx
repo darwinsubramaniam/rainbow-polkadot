@@ -16,9 +16,13 @@ import { GAME_ID } from "./chain/network";
 import { useBoard } from "./chain/useBoard";
 import { markLanded, remember, type RunRecord } from "./chain/history";
 import { connectWallet, useSignerState } from "./chain/wallet";
+import { useProcessorHealth, type Health } from "./chain/health";
 import { Hud } from "./ui/Hud";
 import { TouchPad } from "./ui/TouchPad";
 import { ProofRail, type Step, type StepState } from "./ui/ProofRail";
+import { ProofFlow } from "./ui/ProofFlow";
+import { useMedia } from "./ui/useMedia";
+import { short } from "./ui/short";
 import { Verdict } from "./ui/Verdict";
 import { TopBoard } from "./ui/TopBoard";
 import { YourRuns } from "./ui/YourRuns";
@@ -124,14 +128,23 @@ export function Play() {
     retireQuickTunnel,
   );
 
-  // Dev only: an enclave that answers from this tab instead of a deployed job.
-  // Persisted so a reload does not silently put the app back on a tunnel that
-  // is not running. `simulating` is the value everything else reads — a build
-  // resolves `import.meta.env.DEV` to false, so a stale stored `true` cannot
-  // switch the simulator on in production.
+  // An enclave that answers from this tab instead of a deployed job. Persisted
+  // so a reload does not silently put the app back on a tunnel that is not
+  // running.
+  //
+  // This used to be gated on `import.meta.env.DEV`, so a build could not reach
+  // it at all. That gate is gone deliberately: an Acurast job ends, and until
+  // the contract can start one itself, a player arriving at a dead Processor
+  // had no way to see the game at all. They can now run the enclave here.
+  //
+  // What has NOT been relaxed is anything that keeps it honest. A simulated
+  // attestation is signed by a key that is printed in this repository, so it
+  // is never submitted, its runs are kept in their own history, and both the
+  // log and the UI label it. It is a way to see the machine work, not a way
+  // to reach the leaderboard.
   const [simulated, setSimulated] = useStoredJson("rainbow.simulate", false);
   const [sim, setSim] = useState<Enclave | null>(null);
-  const simulating = import.meta.env.DEV && simulated;
+  const simulating = simulated;
 
   // One session record per enclave. A seed the simulator issued means nothing
   // to the deployed one — each derives its own from its own key — so a held run
@@ -179,11 +192,11 @@ export function Play() {
     say("running standalone — play and attestation work, on-chain submit does not.", "info");
   }, [app, say]);
 
-  // Pull the simulator in only when it is actually switched on, and only in a
-  // dev build. The dynamic import is what keeps it out of the bundle: the
-  // branch is statically false in production, so nothing references the chunk.
+  // Pull the simulator in only when it is actually switched on. Still a
+  // dynamic import: it is now reachable from a build, but the overwhelming
+  // majority of visits never touch it, and they should not pay to download it.
   useEffect(() => {
-    if (!import.meta.env.DEV || !simulated || sim) return;
+    if (!simulated || sim) return;
 
     let live = true;
     void import("./chain/mock")
@@ -199,6 +212,37 @@ export function Play() {
   }, [simulated, sim, say]);
 
   const connecting = signer.status === "connecting";
+
+  // Asked once as soon as the page is open, then every quarter of an hour. The
+  // player should learn that the Processor is not there from the diagram, not
+  // from a Play button that fails after they committed to it.
+  //
+  // Probed even while the enclave is simulated, and that is the whole point of
+  // not passing null here: someone who switched the simulator on because the
+  // job was down needs to be told when it comes back, or they will sit in the
+  // simulator indefinitely posting scores that can never land.
+  const health = useProcessorHealth(verifier.trim() || null);
+
+  // Said once per transition, so the log carries the same story the diagram
+  // does. The ref holds the last status announced: without it every re-render
+  // that re-ran this effect would repeat the line.
+  const saidHealth = useRef<Health | null>(null);
+  useEffect(() => {
+    if (health.status === "checking" || health.status === "unknown") return;
+    if (saidHealth.current === health.status) return;
+    saidHealth.current = health.status;
+    if (health.status === "online") {
+      say("Acurast Processor is answering", "ok");
+      if (simulating) {
+        say("switch the simulator off to play for the leaderboard again.", "info");
+      }
+    } else {
+      say(`Acurast Processor is not answering — ${health.reason ?? "no response"}`, "bad");
+      if (!simulating) {
+        say("the job may have ended. You can simulate the enclave in this tab to see the flow.", "info");
+      }
+    }
+  }, [health.status, health.reason, simulating, say]);
 
   // -- session -------------------------------------------------------------
   //
@@ -466,6 +510,9 @@ export function Play() {
   const cabinetRef = useRef<HTMLDivElement | null>(null);
   const [full, setFull] = useState(false);
 
+  /** Wide enough to draw the four parties rather than list the six steps. */
+  const wide = useMedia("(min-width: 720px)");
+
   useEffect(() => {
     const sync = () => setFull(document.fullscreenElement === cabinetRef.current);
     document.addEventListener("fullscreenchange", sync);
@@ -491,39 +538,51 @@ export function Play() {
 
   const steps: Step[] = [
     {
+      id: "account",
       short: "Account",
-      what: "Connect an account",
+      where: "app",
+      what: "Connect an account to this app",
       why: "Your seed is derived from your address, so nobody can play your session for you.",
       state: at(1, player !== null, player === null),
     },
     {
+      id: "seed",
       short: "Seed issued",
-      what: "The enclave issues a seed",
-      why: "Derived inside the secure element and never guessable — the level is built from it.",
+      where: "processor",
+      what: "This app asks the Processor for a seed, and it answers",
+      why: "The verifier runs on an Acurast Processor — a phone dedicated to the network. It derives the seed inside its secure element, so nobody can work out the level in advance.",
       state: at(2, session !== null, player !== null && session === null),
     },
     {
+      id: "run",
       short: "Run played",
-      what: "Play the run",
-      why: "Every keypress is recorded as a tick-stamped log. The score stays local for now.",
+      where: "you",
+      what: "You play the run, here in this app",
+      why: "Every keypress is recorded as a tick-stamped log. The score stays on this device for now — it is not what gets sent.",
       state: at(3, game.result !== null, session !== null && game.result === null),
     },
     {
+      id: "log",
       short: "Log sent",
-      what: "Send the log, not the score",
-      why: "The request has no score field at all. There is nothing to inflate.",
+      where: "handoff",
+      what: "This app sends the log to the Processor",
+      why: "Your keypresses go, your score does not. The request has no score field at all, so there is nothing to inflate.",
       state: at(4, attestation !== null, game.result !== null && attestation === null),
     },
     {
+      id: "signed",
       short: "Enclave signed",
-      what: "The enclave replays and signs",
-      why: "Same sim.wasm, same seed, its own answer — signed by a key that never leaves the Processor.",
+      where: "processor",
+      what: "The Processor replays the log and signs its own answer",
+      why: "Same sim.wasm, same seed, worked out again inside the TEE — and signed by a key that never leaves the Processor.",
       state: at(5, attestation !== null, busy === "attest"),
     },
     {
+      id: "chain",
       short: "On-chain",
-      what: "The contract checks the signature",
-      why: "Asset Hub recovers the signer, matches it against its verifier set, and takes the score.",
+      where: "chain",
+      what: "The leaderboard contract checks that signature",
+      why: "This app hands the signed score to the contract on Asset Hub, which recovers the signer, matches it against its own verifier set, and only then takes the score.",
       state: at(6, landed, busy === "submit"),
     },
   ];
@@ -655,8 +714,23 @@ export function Play() {
           <TouchPad onPress={game.press} />
         </div>
 
+        {/* The diagram needs room to be a diagram. Below that it would be four
+            boxes scaled into illegibility, so the narrow screen keeps the rail
+            — same six steps, same state, read as a line instead of a map. */}
         <section className="panel stepper" aria-label="Proof trace">
-          <ProofRail steps={steps} />
+          {wide ? (
+            <ProofFlow
+              steps={steps}
+              address={player ? short(player) : null}
+              verifier={simulating ? null : verifier}
+              health={health.status}
+              simulated={simulating}
+              onToggleSimulation={toggleSimulation}
+              onRecheck={health.recheck}
+            />
+          ) : (
+            <ProofRail steps={steps} />
+          )}
         </section>
 
         {attestation && game.result && (

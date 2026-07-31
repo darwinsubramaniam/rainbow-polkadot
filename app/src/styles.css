@@ -639,6 +639,35 @@ input:disabled:hover { border-color: var(--line); }
 .rail li.active .what { color: var(--primary-deep); }
 .rail li.failed .what { color: var(--bad); }
 
+/* Where the step happens. Set in mono and one size down from the label,
+   because it is the same kind of content as a hash or an address — a fact
+   about the machine, not a name for the action. */
+.rail .where {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem;
+  margin-top: .28rem;
+  padding-inline: .2rem;
+  font-family: var(--mono);
+  font-size: .61rem;
+  line-height: 1.3;
+  color: var(--ink-faint);
+  text-wrap: balance;
+}
+/* The glyph is a box rather than a bare svg so the brand marks — which carry
+   their own viewBoxes and their own ink — all land on the same 11px. */
+.rail .where .glyph {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  display: grid;
+  place-content: center;
+}
+.rail .where .glyph svg { width: 100%; height: 100%; display: block; }
+.rail li.idle .where { opacity: .7; }
+.rail li.active .where { color: var(--ink-soft); }
+
 /* The short label carries the state; the full sentence is for screen readers. */
 .sr {
   position: absolute;
@@ -655,6 +684,331 @@ input:disabled:hover { border-color: var(--line); }
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgb(0 95 200 / 0.28); }
   50%      { box-shadow: 0 0 0 5px rgb(0 95 200 / 0); }
+}
+
+/* -- proof flow (the same six steps, as the shape they actually are) ------- */
+
+.proof-flow {
+  /* Tall enough that the content — 342px from the tunnel caption down to the
+     leaderboard — fits at 1:1 after fitView's 6%-a-side padding. Any shorter
+     and the whole diagram scales down to fit the height it did not need. */
+  height: 400px;
+  width: 100%;
+  /* React Flow paints its own surface; this keeps it on the page's ground
+     rather than the library's default grey. */
+  --xy-background-color: transparent;
+}
+.proof-flow .react-flow__attribution {
+  background: transparent;
+  font-size: .58rem;
+}
+.proof-flow .react-flow__attribution a { color: var(--ink-faint); }
+
+/* The parties. A hairline box with the venue over the thing inside it —
+   the same relationship the sketch this is drawn from used. */
+/* 184px, not 172: "Polkadot Product App" has to sit on one line beside its
+   mark, and at 172 it wrapped and pushed the box taller than its sibling. */
+.flow-node {
+  position: relative;
+  width: 184px;
+  min-height: 88px;
+  box-sizing: border-box;
+  padding: .5rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: .12rem;
+  justify-content: center;
+  transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+
+/* The box's own name — the loud line. */
+.flow-party {
+  display: flex;
+  align-items: center;
+  gap: .34rem;
+  font-size: .8rem;
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--ink);
+}
+.flow-party .glyph,
+.flow-you .glyph {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  display: grid;
+  place-content: center;
+}
+.flow-party .glyph svg,
+.flow-you .glyph svg { width: 100%; height: 100%; display: block; }
+
+/* The subheader — what kind of thing it is. Mono and quiet: it qualifies the
+   name above it rather than standing beside it. */
+.flow-detail {
+  display: flex;
+  align-items: center;
+  gap: .28rem;
+  font-family: var(--mono);
+  font-size: .62rem;
+  letter-spacing: .02em;
+  color: var(--ink-soft);
+  min-width: 0;
+}
+.flow-detail .glyph {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  display: grid;
+  place-content: center;
+}
+.flow-detail .glyph svg { width: 100%; height: 100%; display: block; }
+.flow-note {
+  font-family: var(--mono);
+  font-size: .58rem;
+  color: var(--ink-faint);
+  word-break: break-all;
+}
+
+/* Liveness. A dot and a word — this answers "is it there", and must not be
+   mistaken for the louder question of whether the contract trusts it. */
+.flow-health {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  margin-top: .1rem;
+  font-family: var(--mono);
+  font-size: .58rem;
+  color: var(--ink-faint);
+}
+.flow-health .dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+.flow-health.h-online { color: var(--ok); }
+.flow-health.h-online .dot { background: var(--ok); }
+.flow-health.h-offline { color: var(--bad); }
+.flow-health.h-offline .dot { background: var(--bad); }
+/* Simulating while the real Processor is still down. Neither green nor red:
+   nothing is wrong, and nothing is proven either. */
+.flow-health.h-unknown { color: var(--ink-soft); }
+.flow-health.h-unknown .dot { background: var(--ink-faint); }
+.flow-health.h-checking .dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .25; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-health.h-checking .dot { animation: none; }
+}
+
+/* Offered under the box when the Processor is not answering. Positioned out
+   of flow so the box keeps its height — see the note in ProofFlow.tsx. */
+.flow-offline-action {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: .3rem;
+  /* React Flow gives a node `pointer-events: none` unless it is selectable,
+     draggable, or carries mouse handlers — and this diagram switches all of
+     those off, so without re-enabling it here these buttons look live and are
+     not. Scoped to the controls rather than the node, so dragging to pan still
+     works everywhere else across the box. */
+  pointer-events: auto;
+}
+/* Deliberately not a bespoke button. These inherit the site's own `button` and
+   `button.ghost` rules — primary blue for the way forward, hairline ghost for
+   the retry — and only the scale is adjusted, because a full-size control does
+   not fit under a 184px node. */
+.flow-offline-action button {
+  flex: 1;
+  min-width: 0;
+  /* Sized so the widest pair — "Check verifier" beside "Switch off sim" —
+     each sit on one line inside half of a 184px node. */
+  font-size: .62rem;
+  font-weight: 600;
+  padding: .32rem .3rem;
+  border-radius: 6px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+/* The tunnel. A boundary the arrows cross, drawn as a dashed rule with its
+   caption above the boxes — anything box-shaped here would read as a fifth
+   party, and nothing in the system is addressed to it. Kept quiet on purpose:
+   it is the medium, not a participant. */
+.flow-tunnel {
+  width: 136px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .1rem;
+  pointer-events: none;
+}
+.flow-tunnel-label {
+  display: flex;
+  align-items: center;
+  gap: .28rem;
+  font-family: var(--mono);
+  font-size: .6rem;
+  letter-spacing: .04em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.flow-tunnel-label .glyph {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  display: grid;
+  place-content: center;
+}
+.flow-tunnel-label .glyph svg { width: 100%; height: 100%; display: block; }
+.flow-tunnel-host {
+  font-family: var(--mono);
+  font-size: .54rem;
+  color: var(--ink-faint);
+  opacity: .75;
+  max-width: 136px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Stops short of the boxes' lower edge on purpose. The ⑥ arrow to the
+   leaderboard leaves the app underneath them and does NOT cross the tunnel —
+   that submit goes to the chain, not to the phone — so a longer rule would
+   draw a crossing that does not happen. */
+.flow-tunnel-line {
+  width: 0;
+  height: 108px;
+  margin-top: .2rem;
+  border-left: 1px dashed var(--line);
+}
+.flow-tunnel.s-active .flow-tunnel-label { color: var(--primary-deep); }
+.flow-tunnel.s-active .flow-tunnel-line { border-left-color: var(--primary); }
+.flow-tunnel.s-done .flow-tunnel-line { border-left-color: var(--ok); }
+.flow-tunnel.s-failed .flow-tunnel-label { color: var(--bad); }
+.flow-tunnel.s-failed .flow-tunnel-line { border-left-color: var(--bad); }
+
+.flow-you {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .35rem .55rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--ink);
+  transition: border-color .2s ease, background .2s ease;
+}
+
+/* State. One vocabulary for nodes and edges: the party currently doing the
+   work is in the primary, anything settled is in the ok green. */
+.flow-node.s-idle, .flow-you.s-idle { color: var(--ink-faint); }
+.flow-node.s-idle .flow-party { color: var(--ink-faint); }
+.flow-node.s-active, .flow-you.s-active {
+  border-color: var(--primary);
+  background: var(--primary-wash);
+  box-shadow: 0 0 0 3px rgb(0 95 200 / .08);
+}
+.flow-node.s-active .flow-party { color: var(--primary-deep); }
+.flow-node.s-done, .flow-you.s-done { border-color: var(--ok); }
+.flow-node.s-failed, .flow-you.s-failed {
+  border-color: var(--bad);
+  background: var(--bad-wash);
+}
+.flow-node.s-failed .flow-party { color: var(--bad); }
+
+/* Draggable, so say so. React Flow puts `.dragging` on the pane mid-drag. */
+.proof-flow .react-flow__pane { cursor: grab; }
+.proof-flow .react-flow__pane.dragging { cursor: grabbing; }
+
+/* Zoom and recentre. Quiet until wanted: this is a diagram first, and the
+   controls should not be the most eye-catching thing in the panel. */
+.flow-controls {
+  display: flex;
+  gap: .25rem;
+  margin: .45rem !important;
+}
+.flow-controls button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: .85rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .72;
+  transition: opacity .15s ease, border-color .15s ease, color .15s ease;
+}
+.flow-controls button:hover { opacity: 1; border-color: var(--primary); color: var(--primary); }
+.flow-controls button:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.flow-controls button svg { width: 13px; height: 13px; display: block; }
+
+/* The handles are anchors, not controls — nothing here is connectable. */
+.proof-flow .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Edges. Hairline by default so the picture reads as a drawing, and the live
+   one gets weight rather than a colour nobody can see at 1px. */
+.proof-flow .react-flow__edge-path { stroke: var(--line); stroke-width: 1.2; }
+.proof-flow .react-flow__edge.s-active .react-flow__edge-path { stroke: var(--primary); stroke-width: 1.8; }
+.proof-flow .react-flow__edge.s-done .react-flow__edge-path { stroke: var(--ok); stroke-width: 1.5; }
+.proof-flow .react-flow__edge.s-failed .react-flow__edge-path { stroke: var(--bad); stroke-width: 1.8; }
+
+/* Blocked: the route exists but this run may not take it — the simulated
+   enclave's signature is one the contract will not accept. Dashed rather than
+   hidden, because the step is still part of the story; it is simply barred. */
+.proof-flow .react-flow__edge.s-blocked .react-flow__edge-path {
+  stroke: var(--bad);
+  stroke-width: 1.4;
+  stroke-dasharray: 5 4;
+  opacity: .75;
+}
+.proof-flow .react-flow__edge.s-blocked .react-flow__edge-text {
+  fill: var(--bad);
+  font-weight: 600;
+}
+
+.proof-flow .react-flow__edge-text {
+  font-family: var(--mono);
+  /* 10px, because the diagram is capped at 1:1 but is free to scale *down*:
+     at the 760px breakpoint it renders around 0.87, and 9px landed under 8. */
+  font-size: 10px;
+  fill: var(--ink-faint);
+}
+.proof-flow .react-flow__edge.s-active .react-flow__edge-text { fill: var(--primary-deep); }
+.proof-flow .react-flow__edge.s-done .react-flow__edge-text { fill: var(--ok); }
+.proof-flow .react-flow__edge.s-failed .react-flow__edge-text { fill: var(--bad); }
+.proof-flow .react-flow__edge-textbg { fill: var(--bg); }
+
+/* Arrowheads are deliberately NOT styled here. React Flow shares one marker
+   element per colour across every edge that uses it, so a rule at this level
+   would repaint all six the same and undo the state colouring — the colour is
+   set per edge, in ARROW_INK in ProofFlow.tsx. */
+
+@media (prefers-reduced-motion: reduce) {
+  .proof-flow .react-flow__edge.animated path { animation: none; }
 }
 
 /* -- verdict (the two-score confrontation) -------------------------------- */
