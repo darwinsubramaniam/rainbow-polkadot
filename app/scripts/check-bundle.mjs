@@ -45,6 +45,32 @@ const BANNED = [
   },
 ];
 
+/**
+ * URLs that appear in the bundle as data and cannot be dialled.
+ *
+ * A URL is not a connection. These two are the whole of `BULLETIN_RPCS` in
+ * `@parity/product-sdk-host` — a `const` table that nothing outside its own
+ * package references, verified by grepping every `@parity` and `@polkadot-api`
+ * package for the identifier. Vite 6's Rollup shook the table out; Vite 8's
+ * Rolldown keeps it. Nothing about the app changed.
+ *
+ * The exception is only safe because the *capability* patterns above are not
+ * exempted. A string can do nothing on its own — reaching one of these needs a
+ * WebSocket, a ws provider or smoldot, and all three still fail the build. So a
+ * genuinely new endpoint still has to arrive with a dialer, and the dialer is
+ * what gets caught.
+ *
+ * Allowed occurrences are reported on success rather than passed over in
+ * silence. An exception nobody can see is an exception nobody re-examines.
+ */
+const INERT_URLS = new Set([
+  "wss://paseo-bulletin-next-rpc.polkadot.io",
+  "wss://bulletin-paseo.tservices.es:8443",
+]);
+
+/** The full URL a `ws://` / `wss://` hit sits at, for checking against the allowlist. */
+const urlAt = (text, at) => /^wss?:\/\/[^\s"'`,\]}）)]+/.exec(text.slice(at))?.[0] ?? null;
+
 // On the narrowness of that second list, which is one string:
 //
 // The obvious markers — `Ferdie`, the SDK's dev seed phrase, the `DevProvider`
@@ -99,19 +125,25 @@ if (!files.some((f) => path.basename(f) === "index.html") || files.length < 5) {
 }
 
 const hits = [];
+const allowed = new Map();
 for (const file of files) {
   const text = readFileSync(file, "utf8");
   for (const group of BANNED) {
     for (const pattern of group.patterns) {
       let at = text.indexOf(pattern);
       while (at !== -1) {
-        hits.push({
-          group,
-          pattern,
-          file: path.relative(DIST, file),
-          // Enough either side to recognise the call site in minified output.
-          window: text.slice(Math.max(0, at - 30), at + pattern.length + 30).replace(/\s+/g, " "),
-        });
+        const url = pattern.startsWith("ws") && pattern.endsWith("//") ? urlAt(text, at) : null;
+        if (url && INERT_URLS.has(url)) {
+          allowed.set(url, (allowed.get(url) ?? 0) + 1);
+        } else {
+          hits.push({
+            group,
+            pattern,
+            file: path.relative(DIST, file),
+            // Enough either side to recognise the call site in minified output.
+            window: text.slice(Math.max(0, at - 30), at + pattern.length + 30).replace(/\s+/g, " "),
+          });
+        }
         at = text.indexOf(pattern, at + pattern.length);
       }
     }
@@ -120,6 +152,11 @@ for (const file of files) {
 
 if (hits.length === 0) {
   console.log(`check-bundle: ${files.length} files scanned, no direct-chain or local-signer markers`);
+  // Named, not hidden. These are inert data (see INERT_URLS) and stay visible
+  // so the exemption is re-examined rather than inherited.
+  for (const [url, n] of allowed) {
+    console.log(`check-bundle:   allowed inert URL ×${n}  ${url}`);
+  }
   process.exit(0);
 }
 

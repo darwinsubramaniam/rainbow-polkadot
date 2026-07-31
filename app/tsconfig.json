@@ -12,6 +12,14 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
 
+    // TypeScript 5 pulled every `node_modules/@types` package in automatically,
+    // which is how the `node:test` suites compiled without anyone saying so.
+    // TypeScript 7 does not, and the tests stop resolving `node:assert`,
+    // `node:test` and `import.meta.dirname`. Naming it restores exactly what
+    // was implicit before — no more, and the `vite/client` reference in
+    // `src/vite-env.d.ts` is a `///` directive, so it is unaffected.
+    "types": ["node"],
+
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
