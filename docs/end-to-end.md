@@ -96,9 +96,12 @@ export PATH="$HOME/.foundry-polkadot/bin:$PATH"
 
 # Exercise the entrypoint locally first — ~40s, and it starts from an image with
 # no curl and no node, which is the part that keeps failing on the phone.
-cd e2e/acurast-verifier/local-test && ./run.sh --smoke
+cd acurast-verifier/local-test && ./run.sh --smoke
 
 cd .. && acurast deploy rainbow-verifier   # hostname is fixed; see .env
+
+# back to the repo root — the helper scripts are rooted there, not in the bundle
+cd ..
 
 # register the deployment's key, read from Acurast chain state
 node scripts/revive-call.mjs --to $CONTRACT \
@@ -109,7 +112,7 @@ node scripts/attest-and-submit.mjs \
 ```
 
 `<tunnel>` is a per-run hostname only while the job falls back to a quick tunnel. Set
-`CF_TUNNEL_TOKEN` and `VERIFIER_HOSTNAME` in `e2e/acurast-verifier/.env` and the phone
+`CF_TUNNEL_TOKEN` and `VERIFIER_HOSTNAME` in `acurast-verifier/.env` and the phone
 instead attaches as a connector to a named tunnel you own: the hostname then lives in
 Cloudflare rather than in the job, and survives a restart or a reassignment to a different
 processor. `.env.example` has the one-time Cloudflare setup. Note that the tunnel must stay
@@ -120,7 +123,7 @@ if the public hostname's `/identity` is not its own.
 Local iteration without deploying:
 
 ```bash
-cd e2e/acurast-verifier
+cd acurast-verifier
 docker run --rm -v "$PWD:/w" -w /w -e BRIDGE_SOCKET=acurast-mock … node:22-slim sh -c \
   'node local-test/mock-bridge.mjs & node app/verifier.mjs'
 ```

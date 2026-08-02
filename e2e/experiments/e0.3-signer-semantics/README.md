@@ -11,7 +11,7 @@ SIG LAYOUT : r||s  (64 bytes) — the job recovers v itself, and OpenZeppelin wa
 NONCE      : deterministic (RFC 6979)
 ```
 
-That conclusion is what `e2e/acurast-verifier/app/verifier.mjs` and the contract's
+That conclusion is what `acurast-verifier/app/verifier.mjs` and the contract's
 `ECDSA.recover(_hashTypedDataV4(structHash), sig)` are built on. Had it gone the other way —
 a forced `keccak256("acusig" ‖ SCRIPT_HASH ‖ msg)` envelope, as the Node.js runtime
 documents — the contract would compile, deploy, and then silently reject every attestation

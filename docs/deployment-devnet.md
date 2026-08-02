@@ -49,12 +49,12 @@ stable. Keep `app/` byte-identical if you want that to stay true: any edit under
 comment — rotates the key and costs a fresh `setVerifier`.
 
 `CONTRACT` is an Acurast **environment variable** (see the env list in
-`e2e/acurast-verifier/acurast.json`), not a file in the signed bundle, so changing it should
+`acurast-verifier/acurast.json`), not a file in the signed bundle, so changing it should
 not rotate the signing key — the key tracks the bundle. Read it back from the new assignment
 anyway rather than assuming, exactly as [E0.3/E0.4](E0.3-E0.4-acurast.md) argues:
 
 ```bash
-# e2e/acurast-verifier/.env
+# acurast-verifier/.env
 CONTRACT=0x891548f5268FA27B68553eb4841f9246b38A16fA
 
 acurast deploy                       # then read the key off the new assignment

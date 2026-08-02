@@ -3,7 +3,7 @@
 # Acurast CLI scratch (logs + staged deploy bundles)
 .acurast/
 
-# Secrets — never commit. See e2e/acurast-verifier/.env.example
+# Secrets — never commit. See acurast-verifier/.env.example
 .env
 **/.env
 

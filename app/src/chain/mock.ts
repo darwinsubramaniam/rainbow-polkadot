@@ -1,6 +1,6 @@
 // A simulated enclave, for development only.
 //
-// This is a second implementation of `e2e/acurast-verifier/app/verifier.mjs`
+// This is a second implementation of `acurast-verifier/app/verifier.mjs`
 // that runs inside the browser tab: the same session id, the same seed
 // derivation, a replay against the same sim.wasm, and the same EIP-712 digest.
 // What differs is where the key lives — in the constant below, in the open,

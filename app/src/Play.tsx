@@ -40,7 +40,7 @@ import { standaloneReason } from "./main";
  * the value the user types wins and is persisted locally.
  *
  * `VITE_VERIFIER_URL` overrides it at build time. The literal below is the
- * named-tunnel hostname from `VERIFIER_HOSTNAME` in `e2e/acurast-verifier/.env`:
+ * named-tunnel hostname from `VERIFIER_HOSTNAME` in `acurast-verifier/.env`:
  * because the phone attaches as a connector to a tunnel *we* own, the hostname
  * lives in Cloudflare rather than in the job, and survives a restart or a
  * reassignment to a different processor. That is what makes a baked-in constant

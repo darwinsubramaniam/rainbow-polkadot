@@ -1,6 +1,6 @@
 # Local harness for the verifier's shell entrypoint.
 #
-#   cd e2e/acurast-verifier/local-test && ./run.sh
+#   cd acurast-verifier/local-test && ./run.sh
 #
 # Three containers, because the two things start.sh talks to have to be real
 # processes for the test to mean anything: a webhook sink it can POST to, and an

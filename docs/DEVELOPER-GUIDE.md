@@ -578,7 +578,7 @@ graph TD
 ### Deploy it
 
 ```bash
-cd e2e/acurast-verifier
+cd acurast-verifier
 # .env: ACURAST_MNEMONIC, CONTRACT, CHAIN_ID, GAME_ID, WEBHOOK_URL
 acurast estimate-fee rainbow-verifier    # validates config BEFORE spending
 acurast deploy rainbow-verifier
@@ -821,7 +821,7 @@ An Acurast job is a *onetime* execution, and behind a quick tunnel its hostname 
 boot and dies with the job — so the verifier URL baked into `Play.tsx` is stale the moment
 that job ends, and redeploying to change one line of UI is a poor loop. (A named tunnel
 fixes the churn but not the loop: set `VITE_VERIFIER_URL` at build time and the default
-points at a hostname that outlives any one job. See `e2e/acurast-verifier/.env.example`.)
+points at a hostname that outlives any one job. See `acurast-verifier/.env.example`.)
 `npm run dev` therefore offers **Simulate the enclave**, a switch in the Session panel that
 replaces the deployed verifier with `app/src/chain/mock.ts`, running in the tab. It is not the
 only way in: the trace diagram offers **Simulate here** whenever the Processor is measured
