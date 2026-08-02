@@ -14,8 +14,10 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
+import { ActionButtons } from "./ActionButtons";
 import { AcurastMark, PolkadotMark, RainbowMark, RecentreMark, TunnelMark, UserMark } from "./Logos";
 import type { Health } from "../chain/health";
+import { processorState, type Action, type ProcessorState } from "./processor";
 import type { Step, StepId, StepState } from "./ProofRail";
 
 /**
@@ -99,20 +101,6 @@ interface BoxData extends Record<string, unknown> {
   actions?: Action[];
 }
 
-interface Action {
-  label: string;
-  /** True for the way forward, which takes the site's primary button. */
-  primary: boolean;
-  onClick: () => void;
-}
-
-const HEALTH_TEXT: Record<Health, string> = {
-  unknown: "",
-  checking: "checking…",
-  online: "online",
-  offline: "not answering",
-};
-
 /**
  * The app, and the Processor.
  *
@@ -159,16 +147,7 @@ function PartyNode({ data }: NodeProps<Node<BoxData>>) {
           at exactly the moment the picture needs to stay readable. */}
       {data.actions && data.actions.length > 0 && (
         <span className="flow-offline-action">
-          {data.actions.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              className={a.primary ? undefined : "ghost"}
-              onClick={a.onClick}
-            >
-              {a.label}
-            </button>
-          ))}
+          <ActionButtons actions={data.actions} />
         </span>
       )}
 
@@ -440,67 +419,21 @@ export function ProofFlow({
   const { label: tunnelLabel, host: tunnelHost } = tunnelName(verifier);
 
   /**
-   * Everything the Processor box says about itself, in one place.
+   * Everything the Processor box says about itself.
    *
-   * Four situations, and they were previously smeared across the component in
-   * conditions that could not all be seen at once. The one that matters most
-   * is the last: while the enclave is simulated the real Processor is still
-   * being probed, so the moment its job is back the box can say so and offer
-   * the way out. Without that, switching the simulator on is a one-way door —
-   * the app stops asking, and the player has no reason to ever switch it off.
-   *
-   * **Memoised, and it has to be.** `actions` is an array literal, so an
-   * unmemoised version returns a fresh reference on every render. That
+   * The ladder itself lives in `processor.ts`, because the cabinet's own strip
+   * has to offer the same way out of the same dead end — see the note there.
+   * What is local is the memo, and it has to be: `actions` is an array literal,
+   * so an unmemoised call returns a fresh reference on every render. That
    * reference is a dependency of `nodes` below, and `Play` re-renders ten times
    * a second while a run is going — the HUD sample. So the node array was being
    * rebuilt at 10 Hz for the whole length of every run, and the diagram
    * flickered from the first frame of play to the last.
    */
-  const processor: { tone: Health; text: string; actions: Action[] } = useMemo(() => {
-    // A guest never probes the Processor, so this box must not claim it is
-    // down. Saying "still down" about a machine nobody looked at is the same
-    // class of mistake as claiming a step reached the chain: it reads as a
-    // measurement and is not one.
-    if (simulationForced) {
-      return { tone: "unknown", text: "Processor: not checked", actions: [] };
-    }
-
-    return simulated
-    ? {
-        tone: health === "online" ? "online" : "unknown",
-        text:
-          health === "online"
-            ? "Processor is back"
-            : health === "checking"
-              ? "Processor: checking…"
-              : "Processor still down",
-        actions: [
-          // Always offered while simulating, so nobody has to sit out the
-          // fifteen-minute interval to find out the job has been restarted.
-          { label: "Check verifier", primary: false, onClick: onRecheck },
-          // Also always offered. Being in the simulator is a choice, and a
-          // choice you cannot reverse is a trap. It only becomes the *primary*
-          // action once the real Processor is answering again — at that point
-          // staying here costs you every score, because a simulated one is
-          // signed by a key the contract does not know and can never land.
-          {
-            label: "Switch off sim",
-            primary: health === "online",
-            onClick: onToggleSimulation,
-          },
-        ],
-      }
-    : health === "offline"
-      ? {
-          tone: "offline",
-          text: HEALTH_TEXT.offline,
-          actions: [
-            { label: "Check again", primary: false, onClick: onRecheck },
-            { label: "Simulate here", primary: true, onClick: onToggleSimulation },
-          ],
-        }
-      : { tone: health, text: HEALTH_TEXT[health], actions: [] };
-  }, [simulationForced, simulated, health, onRecheck, onToggleSimulation]);
+  const processor: ProcessorState = useMemo(
+    () => processorState({ health, simulated, simulationForced, onRecheck, onToggleSimulation }),
+    [simulationForced, simulated, health, onRecheck, onToggleSimulation],
+  );
 
   /**
    * Whether the view has been moved by hand.

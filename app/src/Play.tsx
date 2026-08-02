@@ -22,12 +22,14 @@ import { Hud } from "./ui/Hud";
 import { TouchPad } from "./ui/TouchPad";
 import { ProofRail, type Step, type StepState } from "./ui/ProofRail";
 import { ProofFlow } from "./ui/ProofFlow";
+import { StageNotice } from "./ui/StageNotice";
+import { processorState } from "./ui/processor";
 import { useMedia } from "./ui/useMedia";
 import { short } from "./ui/short";
 import { Verdict } from "./ui/Verdict";
 import { TopBoard } from "./ui/TopBoard";
 import { YourRuns } from "./ui/YourRuns";
-import { Settings, type Line, type LogKind } from "./ui/Settings";
+import { Log, type Line, type LogKind } from "./ui/Log";
 import { useStoredJson, useStoredString } from "./ui/useStored";
 import { standaloneReason } from "./main";
 
@@ -107,10 +109,13 @@ export function Play() {
   // it mid-run re-renders nothing that the game loop touches.
   const [muted, setMuted] = useStoredJson("rainbow.muted", false);
 
-  // The URL persists as it is edited, so a reload does not cost the user a
-  // pasted tunnel hostname. There was previously a separate uncommitted draft,
-  // which meant a URL typed but never submitted was simply lost.
-  const [verifier, setVerifier] = useStoredString(
+  // Persisted, and no longer editable from the UI: the field that used to set it
+  // lived in the Session sheet, which is now the log alone. What is actually in
+  // use is drawn on the tunnel in the proof diagram, and the value itself comes
+  // from `VITE_VERIFIER_URL` at build time. A stored one from before still wins,
+  // and `localStorage.rainbow.verifier` is the way to point a browser at a
+  // verifier on localhost.
+  const [verifier] = useStoredString(
     "rainbow.verifier",
     DEFAULT_VERIFIER,
     retireQuickTunnel,
@@ -193,7 +198,7 @@ export function Play() {
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<number | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
 
   // Bumped whenever the board is known to have changed — a landed score — or
   // when the player asks. A view call is a dry-run, not a subscription, so
@@ -550,6 +555,26 @@ export function Play() {
       .catch((e: unknown) => say(`wallet: ${e instanceof Error ? e.message : String(e)}`, "bad"));
   }, [say]);
 
+  /**
+   * The Processor's situation, for the strip on the cabinet.
+   *
+   * The same derivation the diagram's Processor box uses, so the two cannot
+   * tell different stories about one machine. Memoised for the same reason it
+   * is memoised there — `actions` is a fresh array each call, and this component
+   * re-renders ten times a second for the whole length of a run.
+   */
+  const processor = useMemo(
+    () =>
+      processorState({
+        health: health.status,
+        simulated: simulating,
+        simulationForced: mode.tier === "guest",
+        onRecheck: health.recheck,
+        onToggleSimulation: toggleSimulation,
+      }),
+    [health.status, health.recheck, simulating, mode.tier, toggleSimulation],
+  );
+
   // -- the controls on the screen ------------------------------------------
   //
   // Both actions live inside the stage, over the picture. The cabinet is what
@@ -681,6 +706,14 @@ export function Play() {
       <div className="container">
         {/* The cabinet gets the full width; everything else sits under it. */}
         <div className="cabinet" ref={cabinetRef}>
+          {/* Above the picture, not below it. A job that has ended is found out
+              mid-play, so this has to be on the cabinet — it is the only place
+              that says so at every width and inside fullscreen — but it must not
+              come out of the game's own space. At the top of the column it is a
+              band across the bezel; between the stage and the HUD it was a slice
+              taken off the bottom of the screen. */}
+          <StageNotice state={processor} />
+
           <div className="stage">
             <div ref={mountRef} className="pixi" />
 
@@ -763,35 +796,22 @@ export function Play() {
                 {muted ? "Sound off" : "Sound on"}
               </button>
               <button onClick={toggleFull}>{full ? "Exit fullscreen" : "Fullscreen"}</button>
-              {/* The session details and the log live behind this. They are for
-                  diagnosing something, not for playing, so they are one press
-                  away rather than permanently on the page. */}
+              {/* Named rather than a gear, because there are no settings behind
+                  it any more — the account, the verifier and the simulator have
+                  each moved to where they are part of the picture. What is left
+                  is the trace, which is for diagnosing something rather than for
+                  playing, so it stays one press away. */}
               <button
-                onClick={() => setSettingsOpen(true)}
-                aria-label="Session settings and log"
-                aria-expanded={settingsOpen}
-                title="Session settings and log"
+                onClick={() => setLogOpen(true)}
+                aria-expanded={logOpen}
+                title="What the app has done, step by step"
               >
-                ⚙
+                Log
               </button>
             </div>
 
-            {settingsOpen && (
-              <Settings
-                onClose={() => setSettingsOpen(false)}
-                address={account?.address ?? null}
-                player={player}
-                onConnect={connect}
-                connecting={connecting}
-                where={mode.summary}
-                verifier={verifier}
-                onVerifier={setVerifier}
-                simulated={simulating}
-                simulationForced={mode.tier === "guest"}
-                onToggleSimulation={toggleSimulation}
-                lines={lines}
-                attestation={attestation}
-              />
+            {logOpen && (
+              <Log onClose={() => setLogOpen(false)} lines={lines} attestation={attestation} />
             )}
           </div>
 

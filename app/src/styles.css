@@ -41,6 +41,12 @@
   --ok-wash: #e4f6ec;
   --bad: #c8102e;
   --bad-wash: #fdecee;
+  /* Neither. A simulated run has not failed and has not proven anything either,
+     so the switch that puts the app there must not borrow the green that means
+     settled or the red that means refused. Sits between --rm-2 and --rm-3
+     below — the renderer's own bridge and coin — and is deepened from them far
+     enough to hold a white knob against it. */
+  --warn: #d97a06;
 
   /* the game's own world */
   --screen: #0d1119;
@@ -405,7 +411,18 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   background: #05070b;
 }
 .cabinet:fullscreen .stage { flex: 1; align-items: center; }
+/* 4.5rem is the HUD and the touch pad — the chin the picture has to share the
+   viewport with. The width is derived from what is left of the height at 4:3,
+   because `.stage` is `flex: 1` and would otherwise let the canvas overflow a
+   column it no longer fits in, which the cabinet's `overflow: hidden` clips. */
 .cabinet:fullscreen .pixi { width: min(100vw, calc((100vh - 4.5rem) * 4 / 3)); }
+/* And 3rem more when the notice is there, for the same reason. Without this the
+   band above the picture is paid for out of the picture: the formula above keeps
+   claiming a height the stage no longer has, and the bottom of the game is cut
+   off rather than scaled to fit. */
+.cabinet:fullscreen:has(.stage-notice) .pixi {
+  width: min(100vw, calc((100vh - 7.5rem) * 4 / 3));
+}
 
 .overlay {
   position: absolute;
@@ -469,6 +486,81 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   color: var(--screen-ink);
 }
 
+/**
+ * The Processor's situation, on the cabinet's top edge above the picture.
+ *
+ * Part of the screen rather than the page, for the same reason the controls are:
+ * the cabinet is what goes fullscreen, and a notice that a phone-sized player
+ * has to leave the game to read is a notice they will not read. Above the stage
+ * rather than under it, so the band it takes comes off the bezel instead of the
+ * bottom of the screen. Wraps rather than scrolls — the buttons drop under the
+ * sentence at narrow widths, which is where they are most needed and where there
+ * is least room for them.
+ */
+.stage-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem .7rem;
+  padding: .6rem 1rem;
+  border-bottom: 1px solid var(--screen-line);
+  background: #0a0e15;
+  font-family: var(--mono);
+  font-size: .72rem;
+  line-height: 1.5;
+  color: var(--screen-ink);
+}
+/* Same dot vocabulary as the diagram's Processor box: liveness, and nothing
+   about whether the contract trusts what is answering. */
+.stage-notice .dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--screen-dim);
+}
+.stage-notice.n-offline .dot { background: #ff8f8f; }
+.stage-notice.n-online .dot { background: #7ee0a8; }
+/* 14rem: enough that the sentence keeps a readable measure before it gives up
+   and takes the whole row, pushing the buttons underneath. */
+.stage-notice-text { flex: 1 1 14rem; min-width: 0; }
+.stage-notice-actions {
+  display: flex;
+  gap: .4rem;
+  /* Right-aligned while the sentence shares the row; harmless once it does not. */
+  margin-left: auto;
+}
+.stage-notice button {
+  font-size: .7rem;
+  font-weight: 600;
+  padding: .34rem .7rem;
+  border-radius: 6px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+/* The site's ghost is a light-surface button and would be a white slab here.
+   Same treatment as the overlay's, which solves the same problem. */
+.stage-notice button.ghost {
+  background: transparent;
+  color: var(--screen-ink);
+  border-color: var(--screen-line);
+}
+.stage-notice button.ghost:hover:not(:disabled) {
+  background: #161c28;
+  border-color: #2b3547;
+  color: #fff;
+}
+/* The simulation switch, in this surface's colours. Off is the hairline the rest
+   of the dark chrome uses. On is the same amber one step lighter — `--rm-2`, the
+   bridge orange out of the renderer — because a colour picked to hold a white
+   knob on white goes muddy against #0a0e15. */
+.stage-notice .switch {
+  --switch-off: #2b3547;
+  --switch-on: var(--rm-2);
+  padding-left: .2rem;
+}
+.stage-notice .switch:focus-visible { outline-color: var(--rm-2); }
+
 /* HUD sits on the cabinet's chin, not in the page — it belongs to the screen. */
 .hud {
   display: flex;
@@ -497,22 +589,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* -- controls ------------------------------------------------------------- */
 
-.field-row {
-  display: flex;
-  gap: .55rem;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.field-row + .field-row { margin-top: .8rem; }
+/* The form shapes that used to live here — `.field`, `.field-row`, `.identity`,
+   `.dev-row` and the input styling under them — went with the Session sheet.
+   Nothing in the app is a form any more: the account and the verifier are drawn
+   in the proof diagram, and the simulator is a pair of buttons on the cabinet. */
 
-.field { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
-.field.grow { flex: 1 1 15rem; }
-.field .hint { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); }
-
-/* `.field .label` is the same thing over a read-only value, where there is no
-   control for a real <label> to point at. */
-label,
-.field .label {
+label {
   font-family: var(--mono);
   font-size: .7rem;
   letter-spacing: .08em;
@@ -520,45 +602,66 @@ label,
   color: var(--ink-faint);
 }
 
-input {
-  background: var(--bg);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: .5rem .65rem;
-  font-family: var(--mono);
-  font-size: .85rem;
-  min-width: 0;
-  width: 100%;
-}
-input:hover { border-color: #c6d3e1; }
-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 0; border-color: var(--primary); }
-input:disabled { opacity: .5; cursor: not-allowed; }
-input:disabled:hover { border-color: var(--line); }
-#slot { width: 5rem; }
-
-/* The dev switch: the button keeps its size, the explanation takes the rest. */
-.dev-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-.dev-row .hint { flex: 1 1 16rem; line-height: 1.5; }
-.dev-row button[aria-pressed="true"] {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--primary-wash);
-}
-
-.identity {
-  display: flex;
+/**
+ * A sliding switch, for a setting that is on or off and stays where it is put.
+ *
+ * The track-and-knob rather than a lit-up button, because it is the toggle idiom
+ * every phone already teaches: the state is the position of the knob, and is
+ * read without reading. That is worth the extra markup here specifically —
+ * whether the enclave is simulated decides whether a run can ever land, and it
+ * is the one setting a player changes and then forgets they changed.
+ *
+ * Both colours come from custom properties so the same control can sit on the
+ * cabinet's dark chin and on the diagram's white surface without a second
+ * implementation. The geometry: a 30x17 track with a 13px knob inset 2px, so
+ * "on" is 30 − 13 − 2 − 2 = 13px of travel.
+ */
+.switch {
+  --switch-off: var(--line);
+  /* Amber, not the primary blue: on here means the app is deliberately off the
+     path that reaches the leaderboard, and blue is the colour this site uses for
+     the way forward. */
+  --switch-on: var(--warn);
+  display: inline-flex;
   align-items: center;
-  gap: .5rem;
-  flex-wrap: wrap;
-  font-family: var(--mono);
-  font-size: .82rem;
-  background: var(--surface);
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  padding: .45rem .6rem;
+  justify-content: center;
+  gap: .4rem;
+  background: transparent;
+  border: 0;
+  color: inherit;
 }
-.identity .arrow { color: var(--ink-faint); }
+.switch-track {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--switch-off);
+  transition: background .18s ease;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .3);
+  transition: transform .18s ease;
+}
+.switch[aria-checked="true"] .switch-track { background: var(--switch-on); }
+.switch[aria-checked="true"] .switch-knob { transform: translateX(13px); }
+/* The knob still moves, because its position *is* the state — what stops is the
+   animating of it. */
+@media (prefers-reduced-motion: reduce) {
+  .switch-track, .switch-knob { transition: none; }
+}
+/* No border to hang a focus ring on, so it goes round the whole control. */
+.switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 6px; }
+.switch:hover:not(:disabled) { background: transparent; }
+.switch:hover:not(:disabled) .switch-track { background: var(--switch-off); }
+.switch[aria-checked="true"]:hover:not(:disabled) .switch-track { background: var(--switch-on); }
 
 .actions { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
 .actions .hint { font-size: .8rem; color: var(--ink-faint); margin-left: auto; }
@@ -815,6 +918,8 @@ input:disabled:hover { border-color: var(--line); }
   left: 0;
   right: 0;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: .3rem;
   /* React Flow gives a node `pointer-events: none` unless it is selectable,
      draggable, or carries mouse handlers — and this diagram switches all of
@@ -823,21 +928,28 @@ input:disabled:hover { border-color: var(--line); }
      works everywhere else across the box. */
   pointer-events: auto;
 }
-/* Deliberately not a bespoke button. These inherit the site's own `button` and
-   `button.ghost` rules — primary blue for the way forward, hairline ghost for
-   the retry — and only the scale is adjusted, because a full-size control does
-   not fit under a 184px node. */
+/* Deliberately not a bespoke button. These inherit the site's own
+   `button.ghost` rule and only adjust the scale, because a full-size control
+   does not fit under a 184px node. */
 .flow-offline-action button {
   flex: 1;
   min-width: 0;
-  /* Sized so the widest pair — "Check verifier" beside "Switch off sim" —
-     each sit on one line inside half of a 184px node. */
+  /* Sized so "Check verifier" sits on one line beside the switch inside a
+     184px node. */
   font-size: .62rem;
   font-weight: 600;
   padding: .32rem .3rem;
   border-radius: 6px;
   line-height: 1.25;
   white-space: nowrap;
+}
+/* The switch keeps its own width rather than taking half the node, and the row
+   wraps under it when the pair no longer fits — a squeezed switch stops being
+   one, and these buttons are out of flow, so a second line costs nothing. */
+.flow-offline-action .switch {
+  flex: none;
+  padding: .32rem .2rem;
+  color: var(--ink-soft);
 }
 
 /* The tunnel. A boundary the arrows cross, drawn as a dashed rule with its
@@ -1179,11 +1291,11 @@ button.tiny {
 }
 .rows + .hint { margin-top: .85rem; }
 
-/* -- the settings sheet --------------------------------------------------- */
+/* -- the log sheet -------------------------------------------------------- */
 
 /* Inside the cabinet, over the picture, because the cabinet is what goes
-   fullscreen — a drawer anywhere else would be unreachable exactly when the gear
-   is pressed from fullscreen. */
+   fullscreen — a drawer anywhere else would be unreachable exactly when it is
+   opened from fullscreen. */
 .sheet {
   position: absolute;
   inset: 0;
@@ -1220,52 +1332,18 @@ button.tiny {
 
 .sheet-body {
   padding: .9rem;
-  overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: .95rem;
   flex: 1;
   min-height: 0;
 }
 
-/* The log is why the sheet is open, so it takes the height the controls above it
-   do not want rather than leaving the stage's dark space empty below it. */
-.sheet-body > .field:last-child { flex: 1; min-height: 8rem; }
-.sheet-body > .field:last-child .trace { flex: 1; overflow: auto; }
-
-/* The controls keep their page shapes but invert onto the dark surface, rather
-   than being restyled into a second design. */
-.sheet-body .label,
-.sheet-body label { color: var(--screen-dim); }
-.sheet-body input {
-  background: #10151f;
-  border-color: var(--screen-line);
-  color: var(--screen-ink);
-}
-.sheet-body input:hover { border-color: #2b3547; }
-.sheet-body input:disabled { opacity: .55; }
-.sheet-body .hint { color: var(--screen-dim); }
-.sheet-body button {
-  background: #151b26;
-  border-color: var(--screen-line);
-  color: var(--screen-ink);
-}
-.sheet-body button:hover:not(:disabled) { background: #1c2432; color: #fff; }
-.sheet-body button[aria-pressed="true"] {
-  border-color: var(--cyan);
-  color: #fff;
-  background: #123240;
-}
-.sheet-body .identity {
-  background: #10151f;
-  border-color: var(--screen-line);
-  color: var(--screen-ink);
-}
-.sheet-body .identity .arrow { color: var(--screen-dim); }
-
-/* The log inside the sheet: dark, and taller than it was on the page, since the
-   sheet exists for reading it. */
-.sheet-body .trace {
+/* The log is the entire body now, so it takes the whole of it rather than
+   leaving the stage's dark space empty below a fixed-height box. */
+.sheet-body > .trace {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   background: #10151f;
   border: 1px solid var(--screen-line);
   border-radius: var(--radius);
