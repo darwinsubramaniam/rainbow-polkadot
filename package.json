@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@parity/dotns-cli": "^0.8.1"
+  }
+}
