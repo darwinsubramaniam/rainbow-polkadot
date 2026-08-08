@@ -31,5 +31,15 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src"]
+  // `.cdm` holds the module augmentations `cdm install` generates — they are
+  // what makes `getContract("@dw3labs/rainbow-leaderboard")` typed rather than
+  // an indexed `unknown`. Left out of `include`, the files exist and do nothing:
+  // every call still compiles, against `Contract<ContractDef>`, whose methods
+  // index to `unknown`.
+  //
+  // Spelled as a glob rather than as `".cdm"`, which does not work. Expanding a
+  // bare directory is a wildcard match, and TypeScript's wildcards skip anything
+  // beginning with a dot — so the whole directory was silently invisible and the
+  // only symptom was the untyped overload quietly winning.
+  "include": ["src", ".cdm/**/*.d.ts"]
 }

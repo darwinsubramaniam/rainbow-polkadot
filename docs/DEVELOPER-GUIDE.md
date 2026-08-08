@@ -80,7 +80,7 @@ sequenceDiagram
     Note over P,E: 1. Claim a session and get its seed
     P->>E: POST /session {player, k}
     E->>E: sessionId = keccak256(player, epoch, k)
-    E->>E: seed = PRF(sessionId) — derived in the secure element
+    E->>E: seed = PRF(epoch, k) — derived in the secure element
     E-->>P: {seed, epoch, k, sessionId}
 
     Note over P: 2. Play offline. No network, no cost.
@@ -92,7 +92,7 @@ sequenceDiagram
 
     Note over E: 4. The enclave trusts nothing but the log
     E->>E: sessionId = keccak256(player, epoch, k)
-    E->>E: seed = PRF(sessionId) — secret, in-enclave
+    E->>E: seed = PRF(epoch, k) — same level for every player
     E->>E: replay sim.wasm → score
     E->>E: build EIP-712 digest
     E->>E: sign with secure-element key
@@ -103,8 +103,9 @@ sequenceDiagram
     P->>P: try v=27, v=28 → keep the one that recovers
 
     P->>L: submit(claim, signature)
-    L->>L: checks: expiry, k, epoch, rules, session, improvement, signer
-    L-->>P: NewBest event
+    L->>L: checks: expiry, k, epoch, rules, session, signer
+    L->>L: record on both boards — all-time and dayOf(epoch)
+    L-->>P: ScoreRecorded event
 ```
 
 **Playing is free.** Cost is paid per *claim*, not per minute played — a ten-minute run is
@@ -116,22 +117,40 @@ sequenceDiagram
 The level is *generated from the seed*, so the client cannot draw anything without it —
 step 1 is not optional. That is a deliberate trade, and the terms matter:
 
-**Seeds are issued for the current epoch only.** `/attest` and the contract both accept
-any epoch `<= current`, because a run played at the end of one epoch may legitimately be
-submitted during the next. Issuing *seeds* on those terms would be a different matter: a
-player could walk back through every past epoch, harvest twelve seeds from each, sample
-them all offline and play only the friendliest one. Restricting issuance to the current
-epoch is what holds the cap at `maxSessionsPerEpoch` per hour.
+**A seed is not anybody's secret.** It is keyed on `(epoch, k)` and *not* on the player, so
+the twelve levels of an hour are the same twelve for everyone and `/session` hands them to
+whoever asks. That is the design, not a leak: it is what makes two scores on one board
+comparable.
 
-Seeds remain unguessable either way — `deriveSeed` signs inside the secure element, so
-knowing one seed says nothing about the next. A player gets the twelve they are entitled
-to and must play each to find out what it holds.
+Keying on `sessionId` — as this did until the daily board landed — was wrong twice over.
+Scores earned on different levels are not comparable: over 20,000 seeds of this `sim.wasm`
+a level carries 17–56 coins and 0–17 enemies, so a *perfect* run is worth 5,100–11,000
+points on the draw alone. And it did not bound grinding either, because
+`maxSessionsPerEpoch` caps seeds per **address**, `/session` derives for any address named,
+`sim.wasm` is published, and the contract credits the `player` inside the signed claim
+rather than `msg.sender` — so a thousand throwaway addresses buy twelve thousand levels to
+choose from.
 
-> **Known gap.** `/session` is unauthenticated: anyone may request any address's seeds and
-> learn which levels that player will face. It consumes nothing (sessions are spent
-> on-chain at `submit`, not at issuance) and any resulting score still credits the bound
-> player, so it is an information leak rather than a theft. Binding issuance to a wallet
-> signature is the obvious hardening and is **not** done here.
+**Seeds are still issued for the current epoch only.** `/attest` and the contract both
+accept any epoch `<= current`, because a run played at the end of one epoch may legitimately
+be submitted during the next. Issuing *seeds* on those terms would let anyone harvest every
+past epoch's levels to practise on before spending a slot. It no longer stops level
+*shopping* — everyone gets the same level whether they look first or not — but it keeps a
+slot a commitment rather than a preview.
+
+`deriveSeed` still signs inside the secure element, so nobody can compute a seed offline or
+invent one for the enclave to replay against. What that buys is now unforgeability rather
+than secrecy.
+
+> **The cost, stated rather than buried.** An input log is portable. A route another player
+> publishes can be replayed, attested and submitted by anyone for the same score — under
+> per-player seeds that log was meaningless to anyone else. This is the daily-puzzle trade:
+> copying still spends one of the copier's twelve slots, and an attested replay of someone
+> else's route is in any case indistinguishable from playing it well.
+
+> **Per-deployment key.** A redeployed verifier serves *different* levels for the same
+> `(epoch, k)`. Always true, invisible while seeds were per-player; use `reuseKeysFrom`
+> across redeployments if two verifiers must agree on what today's levels are.
 
 ---
 
@@ -154,16 +173,20 @@ flowchart TD
     E5 -->|no| X5["RulesMismatch"]
     E5 -->|yes| E6{"session unused?"}
     E6 -->|no| X6["SessionAlreadyUsed"]
-    E6 -->|yes| E7{"beats their best?"}
-    E7 -->|no| X7["NotAnImprovement"]
-    E7 -->|yes| E8{"signer is a verifier?"}
+    E6 -->|yes| E8{"signer is a verifier?"}
     E8 -->|no| X8["BadAttestation"]
-    E8 -->|yes| OK["consume session<br/>store best<br/>emit NewBest"]
+    E8 -->|yes| OK["consume session<br/>max-update both boards<br/>emit ScoreRecorded"]
 
     style OK fill:#1f3a24,stroke:#0a7d33,color:#fff
     style X1 fill:#3a1f1f,stroke:#b3261e,color:#fff
     style X8 fill:#3a1f1f,stroke:#b3261e,color:#fff
 ```
+
+> **There is no improvement check.** A score that beats nothing is recorded, consumes its
+> session, and leaves both boards holding the better number. Refusing it used to be the most
+> common outcome of a submit, and it stranded a player who could not beat their own record on
+> one seed for a whole epoch. The only rejections left are ones a player could not have
+> played their way out of.
 
 > **Watch this ordering when writing tests.** A tamper test aimed at an already-spent session
 > returns `SessionAlreadyUsed` and never reaches the signature check — so it proves nothing.
@@ -173,7 +196,9 @@ flowchart TD
 
 **Anti-grinding (why `epoch` and `k` exist).** A player could otherwise ask for session after
 session, sample each seed for a few seconds, throw away the bad ones and only finish the
-lucky ones. So a session identifier is **derived, never claimed**:
+lucky ones. So a session identifier is **derived, never claimed** — and, since the seed is
+keyed on `(epoch, k)` alone, sampling buys nothing anyway because every slot hands the same
+level to everyone:
 
 ```
 sessionId = keccak256(player, epoch, k)
@@ -224,7 +249,7 @@ flowchart TB
     DG --> R["ECDSA.tryRecover(digest, signature)"]
     R --> A["recovered address"]
     A --> Q{"in the isVerifier set?"}
-    Q -->|yes| OK["consume session · store best · emit NewBest"]
+    Q -->|yes| OK["consume session · max-update both boards · emit ScoreRecorded"]
     Q -->|no| BAD["revert BadAttestation"]
 
     style OK fill:#1f3a24,stroke:#0a7d33,color:#fff
@@ -250,7 +275,7 @@ flowchart LR
         direction TB
         H1["score = 1200"] --> H2["digest 0x7f3a…c81d"]
         H2 --> H3["recovers to 0xVERIFIER…"]
-        H3 --> H4["isVerifier ✓<br/>NewBest emitted"]
+        H3 --> H4["isVerifier ✓<br/>ScoreRecorded emitted"]
     end
 
     subgraph T["TAMPERED — score edited client-side"]
@@ -291,7 +316,7 @@ key over a digest of their choosing. That is forging secp256k1, not editing a tr
 | Malleates the signature to `(r, n−s)` | OpenZeppelin rejects high-`s` → `BadAttestation`. Harmless even without that guard: replay is keyed on `sessionId`, not on the signature bytes | `test_rejectsAMalleableSignature` |
 | Picks the wrong recovery id `v` | recovers to a different address entirely → `BadAttestation` | `test_theWrongRecoveryIdIsRejected` |
 | Submits the same untouched attestation twice | first lands, second hits `SessionAlreadyUsed` | `test_rejectsAReplayedSession` |
-| Replays an old, lower attestation to overwrite a higher best | `NotAnImprovement` — `best` only ever moves up | `testFuzz_onlyImprovementsEverLand` |
+| Replays an old, lower attestation to overwrite a higher best | it is *recorded*, and both boards take the maximum — a weaker run can never lower a number | `testFuzz_everySubmissionLandsAndBestIsTheMaximum` |
 | Submits to a different leaderboard deployment or chain | the domain separator binds `verifyingContract` and `chainId`, so the digest computed there differs → `BadAttestation` | `test_digestIsBoundToThisContractAndChain` |
 
 Every row ends in a revert. The attacker pays gas and changes nothing. Run them with
@@ -328,9 +353,10 @@ pays their gas. That is covered by `test_anyoneMayRelay_scoreCreditsThePlayer`.
 > transaction. It buys **no integrity**: it changes *who the sender is*, a value the contract
 > deliberately ignores, so it closes none of the rows in the table above. What it adds is
 > real — a funded key custodied on a phone whose deployment rotates, nonce management on a
-> single-threaded job, an escrow protocol with refunds for the `NotAnImprovement` reverts
-> that will be routine, and a hard liveness dependency where today the player holds a
-> self-serve proof.
+> single-threaded job, and a hard liveness dependency where today the player holds a
+> self-serve proof. (It would once have needed an escrow with refunds for the routine
+> `NotAnImprovement` reverts as well; the contract no longer refuses a weak score, so that
+> particular cost has gone.)
 >
 > The one thing it *would* change is the denominator problem — an enclave that submits every
 > result makes withheld runs impossible. That does not apply to a **highest score** board;
@@ -378,6 +404,36 @@ cdm setup           # installs the Rust/PVM toolchain; npm does NOT
 > # then, ONLY for cdm builds:
 > export PATH="$HOME/.foundry-polkadot/bin:$PATH"
 > ```
+
+> **Do not `npm update` `@parity/product-sdk`.** It is pinned to `0.19.1`, with no
+> caret, and `@parity/truapi` is pinned to `0.5.1` even though nothing imports it.
+>
+> The SDK version is constrained by the *installed Polkadot Desktop build*, not by
+> npm's `latest`. App and host are independent implementations of one SCALE wire
+> protocol with no negotiation step. `truapi` 0.6.0 changed `DerivationIndex` from
+> `u32` to a `Left | Right` union — one extra byte, inside the first field of the
+> transaction payload, which shifts every field after it. The host then reads a
+> garbage `extensions` length and runs off the buffer:
+>
+> ```
+> Transport error RangeError: Offset is outside the bounds of the DataView
+> ```
+>
+> It fires the moment a score is submitted, the transaction never reaches the phone,
+> and the nonce stays `0`. Reads and account resolution keep working throughout —
+> `getProductAccount` succeeding proves nothing about protocol compatibility, because
+> it has no fields after the signer to misalign.
+>
+> Before bumping, check the host binary rather than the reference apps (which trail on
+> 0.15.1), and diff it against `node_modules/@parity/truapi/dist/generated/types.js`:
+>
+> ```bash
+> npx @electron/asar extract-file \
+>   "/Applications/Polkadot Desktop Dev.app/Contents/Resources/app.asar" \
+>   node_modules/@novasamatech/host-api/dist/protocol/v1/accounts.js
+> ```
+>
+> Full reasoning and the compatibility map: the header comment in `app/src/chain/network.ts`.
 
 ### 7.2 Accounts
 
@@ -567,13 +623,13 @@ graph TD
    anything signed.
 3. **`rulesHash` is computed from the loaded artifact**, not configured, so the enclave
    cannot attest for a ruleset it is not running.
-4. **The seed cannot be computed outside.**
-   `seed = keccak256(signer_sign("rainbow-seed-v1" ‖ sessionId))`. `signer_sign` is
-   deterministic (RFC 6979) and its key is in the secure element, so this is a PRF the
-   player cannot evaluate offline. The seed *is* released by `/session` — the level is
-   generated from it, so the client cannot play without it — but only for the current
-   epoch and only for `k < maxSessionsPerEpoch`. See "Why the seed is handed out at all"
-   above.
+4. **The seed cannot be computed outside, or invented.**
+   `seed = keccak256(signer_sign("rainbow-seed-v2" ‖ epoch ‖ k))`. `signer_sign` is
+   deterministic (RFC 6979) and its key is in the secure element, so no client can compute
+   a seed offline or hand the enclave one to replay against. The seed *is* released by
+   `/session` — the level is generated from it, so the client cannot play without it — and
+   deliberately to anyone, since it is the same level for every player. See "Why the seed
+   is handed out at all" above.
 
 ### Deploy it
 
@@ -807,10 +863,14 @@ rather than here: only `live` can ever submit, a guest is always pinned to the i
 every tier gets a distinct slot, and a refusal always carries a reason.
 
 > **What is *not* checked is individual movement.** The input log carries no identity, in any
-> tier. Identity binds one level up and more strongly: the seed derives from the address, so
-> the level itself is a function of who is playing, and `attest` re-derives
-> `sessionIdFor(player, epoch, k)` rather than trusting any seed it is handed. A log recorded
-> on one player's level, replayed under another's, runs against a different level entirely.
+> tier — and since the seed stopped deriving from the address, a log is genuinely portable: a
+> route one player publishes can be replayed by another against the same level, attested, and
+> submitted for the same score. That is accepted, not overlooked. It costs the copier one of
+> their twelve slots, and an attested replay of someone else's route is indistinguishable
+> from playing it well. What identity still binds is the *slot*: `attest` re-derives
+> `sessionIdFor(player, epoch, k)` rather than trusting anything it is handed, so a
+> submission always spends the claimed player's own budget.
+>
 > And the enforcement that matters is not in the client at all — a simulated attestation is
 > signed by a key the contract's `isVerifier` set does not contain, so the contract rejects it
 > whatever the UI believes. `mode.canSubmit` is convenience; the verifier set is the guarantee.
@@ -828,7 +888,7 @@ only way in: the trace diagram offers **Simulate here** whenever the Processor i
 offline, and the `guest` tier uses the same module without asking.
 
 It is a second implementation of `verifier.mjs`, deliberately faithful: the same
-`sessionIdFor`, the same `keccak256(sign("rainbow-seed-v1" ‖ sessionId))` seed derivation, a
+`sessionIdFor`, the same `keccak256(sign("rainbow-seed-v2" ‖ epoch ‖ k))` seed derivation, a
 replay through `sim_verify` on its **own** wasm instance — not the one the player just
 played on — and the same EIP-712 digest. `rulesHash` is hashed from the bytes it actually
 loaded. Steps 1–5 of the proof rail work end to end with nothing deployed.

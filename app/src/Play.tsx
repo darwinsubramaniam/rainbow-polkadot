@@ -7,13 +7,15 @@ import {
   localEpoch,
   minutesToReset,
   nextAttempt,
+  reconcileSpent,
   MAX_ATTEMPTS,
   type SessionRecord,
 } from "./chain/attempts";
-import { playerAddress, submitAttestation } from "./chain/submit";
+import { SessionAlreadySpent, playerAddress, submitAttestation } from "./chain/submit";
 import { resolveMode, type Slot, type Tier } from "./chain/mode";
 import { addressOf } from "./chain/leaderboard";
 import { GAME_ID } from "./chain/network";
+import { readVerifierTrusted, type Scope } from "./chain/board";
 import { useBoard } from "./chain/useBoard";
 import { markLanded, remember, type RunRecord } from "./chain/history";
 import { connectHost, connectWallet, useSignerState } from "./chain/wallet";
@@ -204,10 +206,19 @@ export function Play() {
   // when the player asks. A view call is a dry-run, not a subscription, so
   // nothing tells the app that someone else's run went on-chain.
   const [boardKey, setBoardKey] = useState(0);
+  /**
+   * Which of the contract's two boards is on screen.
+   *
+   * Defaults to today, because that is the one a new player can reach. The
+   * all-time board is a record of everyone who has ever played and is, for
+   * almost everyone, a list of other people; the daily board empties at
+   * midnight UTC and puts a first run somewhere visible.
+   */
+  const [scope, setScope] = useState<Scope>("today");
   // A guest address has no on-chain record to look up, and asking for one would
   // spend a dry-run to be told zero. The top of the board is still read — it is
   // public, and worth seeing before you decide to connect anything.
-  const board = useBoard(app ?? null, GAME_ID, mode.hasOnChainRecord ? player : null, boardKey);
+  const board = useBoard(app ?? null, GAME_ID, mode.hasOnChainRecord ? player : null, scope, boardKey);
 
   const say = useCallback((text: string, kind: LogKind = "info") => {
     setLines((l) => [...l.slice(-60), { kind, text }]);
@@ -327,6 +338,21 @@ export function Play() {
   const canReplay = next.mode === "replay";
   const exhausted = next.mode === "exhausted";
 
+  /*
+   * "Different seed" used to live here, and it is gone with the reason for it.
+   *
+   * It existed because a submit that did not beat the player's own best
+   * reverted and consumed nothing, so a player who could not improve was pinned
+   * to one level until the epoch rolled — the same seed handed back, run after
+   * run. Skipping was the way out, at the cost of spending a slot to look at a
+   * level and walk away.
+   *
+   * The contract now records every attested run and consumes the session on the
+   * first submission whatever it scored. Play always advances, so there is
+   * nothing left to be stuck on, and the button would only offer to throw away
+   * a slot for nothing.
+   */
+
   /**
    * The enclave this run talks to, or null with the reason it is not ready.
    *
@@ -336,6 +362,35 @@ export function Play() {
    */
   const endpoint = (): Enclave | null => (simulating ? sim : verifier.trim() ? remote(verifier.trim()) : null);
   const notReady = () => (simulating ? "the simulator is still loading…" : "set the verifier URL first");
+
+  /**
+   * Say what this run has to beat, at the moment it starts.
+   *
+   * A target, not a gate. The contract accepts every attested run now, so this
+   * is the number worth beating rather than the bar for being allowed to
+   * submit — said at the start so it reads as something to aim at rather than
+   * as a verdict delivered after the fact.
+   *
+   * Read from the board panel's snapshot rather than asking the chain again:
+   * this is a prompt, not a decision, and `submitAttestation` does its own live
+   * read before it spends anything. A stale number here misinforms; a stale
+   * number there would block a submit that should land.
+   *
+   * Silent for a guest, whose runs never reach the contract, and silent while
+   * the read is in flight or has never landed — a target of "0" that turns out
+   * to be a failed read is worse than saying nothing.
+   */
+  const sayTarget = useCallback(() => {
+    if (!mode.canSubmit || board.yourBest === null) return;
+    if (board.yourBest === 0n) {
+      say("no score on this board yet — anything that lands takes the spot", "info");
+      return;
+    }
+    // "has to beat it to land" was true of the old contract and is not any more:
+    // every attested run is recorded and consumes its session whatever it scores.
+    // What beating it changes is the number, not whether the run reaches the chain.
+    say(`your best on this board is ${board.yourBest} — beat it to move the number`, "info");
+  }, [mode.canSubmit, board.yourBest, say]);
 
   const play = useCallback(async () => {
     const api = endpoint();
@@ -368,6 +423,40 @@ export function Play() {
         if (id.gameId !== GAME_ID) {
           say(`the board shown is game ${GAME_ID}, but this enclave attests game ${id.gameId}`, "bad");
         }
+
+        // Whether the contract will take this enclave's signature at all.
+        //
+        // Asked here, before the level is generated, because the answer cannot
+        // be discovered later by anything except failing: `submit` recovers the
+        // signer and checks its own verifier set, so an unregistered enclave
+        // reverts with `BadAttestation` at the end of a completed run. This is
+        // one view call against a board the app is already reading.
+        //
+        // Only for a tier that can actually submit. A simulated enclave signs
+        // with a key that lives in this tab and is *supposed* not to be a
+        // verifier — warning about that would be noise on the one path where it
+        // means nothing.
+        //
+        // Never fatal, and deliberately outside the enclave `try` above: a chain
+        // read that fails says nothing about whether the enclave is trusted, and
+        // blocking a run on a failed *warning* would be worse than the warning
+        // being missing. Awaited rather than fired off, so it is on screen before
+        // the player starts rather than somewhere in the middle of their run.
+        if (app && mode.canSubmit) {
+          try {
+            const enclaveAddress = addressOf(id.secp256k1);
+            if (!(await readVerifierTrusted(app, enclaveAddress))) {
+              say(`this enclave (${enclaveAddress.slice(0, 10)}…) is not a registered verifier`, "bad");
+              say(
+                "the contract will refuse the score with BadAttestation. Register it with setVerifier, " +
+                  "or the run will not land however well you play.",
+                "bad",
+              );
+            }
+          } catch (e) {
+            say(`could not check the verifier set (${e instanceof Error ? e.message : String(e)})`, "info");
+          }
+        }
       } catch (e) {
         if (next.mode !== "replay") throw e;
         say(`enclave unreachable (${e instanceof Error ? e.message : String(e)})`, "bad");
@@ -377,6 +466,7 @@ export function Play() {
       if (next.mode === "replay") {
         setSession({ epoch: next.epoch, k: next.k, seed: next.seed });
         say(`session epoch ${next.epoch} k ${next.k} still open — same seed ${next.seed}`, "ok");
+        sayTarget();
         game.start(BigInt(next.seed));
         return;
       }
@@ -386,6 +476,7 @@ export function Play() {
       setRecord({ player, epoch: s.epoch, k: s.k, seed: s.seed, spent: false });
       say(`session epoch ${s.epoch} k ${s.k} — seed ${s.seed}`, "ok");
       say(`the level below was generated from that seed, inside sim.wasm`);
+      sayTarget();
 
       game.start(BigInt(s.seed));
     } catch (e) {
@@ -394,7 +485,11 @@ export function Play() {
     } finally {
       setBusy(null);
     }
-  }, [verifier, simulating, sim, player, next, setRecord, say, game]);
+    // `app` and `mode.canSubmit` are here for the verifier pre-flight above.
+    // `app` in particular is not optional: it starts null and becomes the host's
+    // once connected, so a closure that captured the null would skip the check
+    // for the rest of the session — the exact case the check exists for.
+  }, [verifier, simulating, sim, player, next, setRecord, say, sayTarget, game, app, mode.canSubmit]);
 
   // -- attest + submit -----------------------------------------------------
 
@@ -466,27 +561,49 @@ export function Play() {
       // The enclave address only picks the signature's recovery id; the
       // contract recovers the signer itself and checks its own verifier set,
       // so a wrong value here reverts rather than forging an acceptance.
-      const out = await submitAttestation(app, att, addressOf(enclave.secp256k1), () =>
-        // A one-time `map_account`, and the reason two wallet prompts appear on
-        // a player's first ever submit rather than one.
-        say("first submit for this product — approving its one-time chain mapping…", "info"),
+      const out = await submitAttestation(
+        app,
+        att,
+        addressOf(enclave.secp256k1),
+        () =>
+          // A one-time `map_account`, and the reason two wallet prompts appear on
+          // a player's first ever submit rather than one.
+          say("first submit for this product — approving its one-time chain mapping…", "info"),
+        // Stage markers. The submit makes four host round trips and three of
+        // them can fail with the identical message, so without these a failure
+        // says what went wrong but never where.
+        (text) => say(text, "info"),
       );
-      setLanded(out.matches);
-      if (!out.matches) setFailed(6);
-      say(`best(${att.claim.gameId}) is now ${out.best}`, out.matches ? "ok" : "bad");
+      // Reaching here at all means the transaction landed. Whether it moved a
+      // number is a separate question and is reported as one — the old code
+      // conflated them, because back then the only way to land was to improve.
+      setLanded(true);
+      say(
+        out.improvedToday
+          ? `new best on today's board — ${out.dailyBest}`
+          : `recorded · today's best stays ${out.dailyBest}`,
+        out.improvedToday ? "ok" : "info",
+      );
+      if (out.improvedAllTime) say(`new all-time best — ${out.best}`, "ok");
 
-      // Only an accepted submit consumes the session on-chain. A revert —
-      // `NotAnImprovement` most often — leaves the attempt open, so the player
-      // keeps the level rather than being charged for a rejected transaction.
-      if (out.matches) {
-        setRecord({ player, epoch: session.epoch, k: session.k, seed: session.seed, spent: true });
-        setHistory(markLanded(attested, { player, epoch: session.epoch, k: session.k }));
-        // The board just changed, and this is the one moment the app knows it.
-        setBoardKey((k) => k + 1);
-        const left = MAX_ATTEMPTS - (session.k + 1);
-        say(left > 0 ? `session consumed — ${left} runs left this hour` : "no runs left this hour", "info");
-      }
+      setRecord({ player, epoch: session.epoch, k: session.k, seed: session.seed, spent: true });
+      setHistory(markLanded(attested, { player, epoch: session.epoch, k: session.k }));
+      // Both boards just changed, and this is the one moment the app knows it.
+      setBoardKey((k) => k + 1);
+      const left = MAX_ATTEMPTS - (session.k + 1);
+      say(left > 0 ? `session consumed — ${left} runs left this hour` : "no runs left this hour", "info");
     } catch (e) {
+      // The chain has already burned this slot, so the held seed is dead and
+      // replaying it would revert forever. Fold that back into the record — the
+      // player's next Play then mints a fresh slot instead of being pinned to a
+      // level they can never land. Not drawn as a stage failure: nothing about
+      // the run went wrong.
+      if (e instanceof SessionAlreadySpent) {
+        if (record) setRecord(reconcileSpent(record, true));
+        setBoardKey((k) => k + 1);
+        say(`${e.message}`, "info");
+        return;
+      }
       setFailed(stage);
       say(`failed: ${e instanceof Error ? e.message : String(e)}`, "bad");
     } finally {
@@ -502,6 +619,7 @@ export function Play() {
     player,
     enclave,
     app,
+    record,
     setRecord,
     history,
     setHistory,
@@ -589,6 +707,75 @@ export function Play() {
   /** Nothing left to do with this run: it is attested, and either landed or unlandable. */
   const attestSettled = attestation !== null && (landed || !mode.canSubmit);
 
+  /**
+   * The number this run had to beat, or null when there is nothing to compare.
+   *
+   * Null for a guest and for a simulated enclave — neither can reach the
+   * contract, so their runs are not measured against it — and null while the
+   * board read is in flight or has failed, where the honest answer is "not
+   * known" rather than zero.
+   */
+  const target = mode.canSubmit ? board.yourBest : null;
+
+  /**
+   * Whether this run would raise the number the board already holds.
+   *
+   * **A label, not a gate**, and the difference is the point. This used to
+   * disable the attest button, because the contract took a score only if it
+   * strictly beat the player's own best and sending anything else spent a round
+   * trip through the enclave, a wallet prompt and a dry-run to be told no.
+   *
+   * The contract records every attested run now, so a run that ties or falls
+   * short lands like any other — it simply leaves the number where it was. The
+   * player is told which of those is about to happen and then allowed to do it.
+   *
+   * True whenever there is nothing to compare against, so an unknown best is
+   * never reported as a miss.
+   */
+  const beatsBest = game.result === null || target === null || game.result.score > target;
+
+  /**
+   * Keep every finished run, not only the ones worth attesting.
+   *
+   * Blocking the attest of a run that cannot beat your best also removed the
+   * only place a run was ever recorded, which would have quietly deleted it
+   * from your own top ten. So the record is written when the run ends instead,
+   * marked `attested: false` — this browser's own count, and labelled as such
+   * in the panel.
+   *
+   * A later attest of the same slot overwrites it with the enclave's number and
+   * the enclave's authority; `remember` prefers the signed record even when the
+   * local one reads higher, which is exactly the case where the difference
+   * matters.
+   *
+   * The ref is what makes this run once per result rather than once per render:
+   * `setHistory` takes a value, not an updater, so the effect has to see the
+   * current list, and depending on it would otherwise re-enter forever.
+   */
+  const recorded = useRef<string | null>(null);
+  useEffect(() => {
+    if (!game.result || !session) return;
+    const slot = `${session.epoch}-${session.k}-${game.result.score}-${game.result.ticks}`;
+    if (recorded.current === slot) return;
+    recorded.current = slot;
+
+    setHistory(
+      remember(history, {
+        player,
+        score: String(game.result.score),
+        ticks: game.result.ticks,
+        epoch: session.epoch,
+        k: session.k,
+        at: Date.now(),
+        // No verdict yet, and `agreed` only means anything once there is one —
+        // the panel reads it through `attested` for that reason.
+        agreed: false,
+        landed: false,
+        attested: false,
+      }),
+    );
+  }, [game.result, session, player, history, setHistory]);
+
   const attestLabel =
     busy === "attest"
       ? "Attesting…"
@@ -599,10 +786,10 @@ export function Play() {
           : attestSettled
             ? "Attested"
             : mode.canSubmit
-              ? "Attest & submit"
-              : mode.tier === "guest"
-                ? "Attest (guest)"
-                : "Attest (simulated)";
+                ? "Attest & submit"
+                : mode.tier === "guest"
+                  ? "Attest (guest)"
+                  : "Attest (simulated)";
 
   const playLabel =
     busy === "session"
@@ -738,6 +925,11 @@ export function Play() {
                         {playLabel}
                       </button>
                     </div>
+                    {canReplay && (
+                      <p className="dim">
+                        Holding seed {next.seed} · this slot is yours until a run of it lands on the board.
+                      </p>
+                    )}
                     {exhausted && <p className="dim">That is every run for this hour.</p>}
                   </>
                 ) : (
@@ -767,6 +959,19 @@ export function Play() {
                 <p>
                   this device scored <b>{String(game.result.score)}</b> over {game.result.ticks} ticks
                 </p>
+
+                {/* Told, not enforced. The submit will land either way and
+                    consume this slot; what changes is whether the number on the
+                    board moves. Saying so here is the difference between a
+                    player choosing to send a weaker run and being surprised by
+                    one. */}
+                {!beatsBest && target !== null && (
+                  <p className="dim">
+                    Your best on this board is <b>{String(target)}</b>, this round{" "}
+                    <b>{String(game.result.score)}</b> — it will still be recorded on chain, and
+                    leave your best where it is.
+                  </p>
+                )}
 
                 {attestation ? (
                   <p className={BigInt(attestation.claim.score) === game.result.score ? "ok" : "bad"}>
@@ -860,7 +1065,13 @@ export function Play() {
             The session controls and the technical log that used to occupy these
             two slots are behind the gear on the stage. */}
         <div className="play-below">
-          <TopBoard view={board} you={player} onRefresh={() => setBoardKey((k) => k + 1)} />
+          <TopBoard
+            view={board}
+            you={player}
+            scope={scope}
+            onScope={setScope}
+            onRefresh={() => setBoardKey((k) => k + 1)}
+          />
           <YourRuns
             history={history}
             you={player}

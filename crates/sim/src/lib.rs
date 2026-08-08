@@ -6,9 +6,16 @@
 //!
 //! The game is a side-scrolling platformer: run, jump, stomp enemies, collect
 //! coins, avoid spikes and pits, reach the goal. The level itself is *generated
-//! from the seed*, which is why the seed must stay secret until the enclave
-//! issues it — see `deriveSeed` in the verifier. A player who could pick their
-//! own seed could shop for an easy level.
+//! from the seed*, which is why the seed is derived inside the enclave rather
+//! than chosen — see `deriveSeed` in the verifier. A player who could pick their
+//! own seed could shop for an easy level, and the levels this generator produces
+//! differ enough to make that worth doing: a perfect run is worth roughly
+//! 5,100–11,000 points depending only on how many coins and enemies the draw
+//! placed.
+//!
+//! That spread is also why the seed is keyed on `(epoch, k)` alone and not on
+//! the player. Everyone playing a given slot faces the same level, so two scores
+//! on one board were earned under the same conditions.
 //!
 //! # Determinism rules, and how they are enforced
 //!

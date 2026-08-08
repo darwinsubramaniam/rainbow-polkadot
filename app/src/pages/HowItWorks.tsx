@@ -111,12 +111,18 @@ export function HowItWorks() {
                 </li>
                 <li>
                   <span className="actor">Inside the secure element</span>
-                  <h3>The seed is derived, not drawn</h3>
+                  <h3>The seed is derived, not drawn — and it is everyone&apos;s</h3>
                   <p>
-                    <code>seed = keccak256(sign(&quot;rainbow-seed-v1&quot; ‖ sessionId))</code>. The signing key lives
-                    in the secure element and the signature scheme is deterministic, which makes this a function nobody
-                    can evaluate offline. You get twelve slots an hour and must actually play each one to find out what
-                    it holds.
+                    <code>seed = keccak256(sign(&quot;rainbow-seed-v2&quot; ‖ epoch ‖ k))</code>. The signing key lives
+                    in the secure element and the signature scheme is deterministic, so nobody can compute a seed
+                    offline or invent one for the enclave to replay against.
+                  </p>
+                  <p>
+                    Note what is <em>not</em> in that preimage: you. Twelve levels an hour, the same twelve for
+                    everybody, so two scores on the board were earned on the same level. Keying the seed to the player
+                    instead — as this once did — meant ranking the luck of the draw alongside the play: a flawless run
+                    is worth anywhere from 5,100 to 11,000 points depending only on how many coins and enemies your
+                    level happened to be given.
                   </p>
                 </li>
                 <li>

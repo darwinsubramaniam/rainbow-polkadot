@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { App } from "@parity/product-sdk/core";
 
-import { BoardUnavailable, readBoard, readYourBest } from "./board";
+import { BoardUnavailable, readBoard, readCurrentDay, readYourBest, type Scope } from "./board";
 import { rank, type Row } from "./ranking";
 
 /**
@@ -11,6 +11,10 @@ import { rank, type Row } from "./ranking";
  * panel has to distinguish — no host, loading, ready, failed — and the difference
  * between "nobody has scored" and "we could not read it" is exactly what a
  * leaderboard must not blur.
+ *
+ * Two boards, one hook: the contract's all-time and daily views take the same
+ * shape and differ only in a leading `day`, so a second hook would be the same
+ * four states maintained twice.
  */
 
 export type BoardStatus =
@@ -35,6 +39,14 @@ export interface BoardView {
   error: string | null;
   /** True when the deployment predates the board view, which needs a redeploy. */
   needsRedeploy: boolean;
+  /**
+   * The chain's day index this view covers, or null for the all-time board.
+   *
+   * Read from the contract rather than the device clock, and surfaced so the
+   * panel can say which day it is showing — a daily board that empties is
+   * indistinguishable from a broken one unless it names its own scope.
+   */
+  day: number | null;
 }
 
 const EMPTY: BoardView = {
@@ -46,9 +58,13 @@ const EMPTY: BoardView = {
   at: null,
   error: null,
   needsRedeploy: false,
+  day: null,
 };
 
 /**
+ * @param scope which board to read. Switching it re-reads rather than filtering
+ *        what is already here: the daily board is a different roster on the
+ *        contract, not a subset of the all-time one.
  * @param refreshKey bump it to re-read. A landed score changes the board, and
  *        nothing pushes that fact to us — a read is a dry-run, not a
  *        subscription — so the caller says when it is worth asking again.
@@ -57,6 +73,7 @@ export function useBoard(
   app: App | null,
   gameId: number,
   player: string | null,
+  scope: Scope,
   refreshKey: number,
 ): BoardView {
   const [view, setView] = useState<BoardView>(EMPTY);
@@ -74,13 +91,18 @@ export function useBoard(
     let live = true;
     void (async () => {
       try {
-        const snapshot = await readBoard(app, gameId);
+        // Resolved once and threaded through both reads. Asking the chain twice
+        // could straddle midnight and pair a roster from one day with a personal
+        // best from the next.
+        const day = scope === "today" ? await readCurrentDay(app) : null;
+
+        const snapshot = await readBoard(app, gameId, day);
         // Read after the board, and tolerated separately: a failure here is not
         // a reason to withhold a board that was read successfully.
         let yourBest: bigint | null = null;
         if (player) {
           try {
-            yourBest = await readYourBest(app, gameId, player);
+            yourBest = await readYourBest(app, gameId, player, day);
           } catch {
             yourBest = null;
           }
@@ -95,6 +117,7 @@ export function useBoard(
           at: snapshot.at,
           error: null,
           needsRedeploy: false,
+          day,
         });
       } catch (e) {
         if (!live) return;
@@ -110,7 +133,7 @@ export function useBoard(
     return () => {
       live = false;
     };
-  }, [app, gameId, player, refreshKey]);
+  }, [app, gameId, player, scope, refreshKey]);
 
   return view;
 }

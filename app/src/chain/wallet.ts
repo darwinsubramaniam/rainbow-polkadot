@@ -58,6 +58,67 @@ const hostManager = new SignerManager({
         requestName: false,
       },
     }),
+
+  /**
+   * Ask for the contract allowance once, here, because this is where the SDK
+   * says to: `onConnect`'s context carries a pre-bound
+   * `requestResourceAllocation`, and it fires on connect *and* after every
+   * auto-reconnect — which is exactly the lifetime an allowance has.
+   *
+   * The index must match the one `contractAccount()` derives with, or the host
+   * pre-warms one account while we submit from another. Both read
+   * `CONTRACT_ACCOUNT_INDEX`.
+   *
+   * **This does not replace the check in `submit.ts`, and must not.** The SDK
+   * is explicit that errors thrown from `onConnect` "are logged but do not
+   * affect the connected state" — so a refusal here is silent, and the player
+   * would learn about it only as a failed submit at the end of a run. This is
+   * the early, quiet attempt; `ensureContractAllowance` remains the loud one
+   * that can actually stop a submit with a reason. Asking twice costs a host
+   * round trip and buys a failure the player can act on.
+   *
+   * `signal` aborts if the user disconnects mid-flight, so a late reply cannot
+   * report against a session that has already gone.
+   */
+  onConnect: async (_account, { requestResourceAllocation, signal }) => {
+    try {
+      const outcomes = await requestResourceAllocation([
+        // A plain index, not a `{ tag: "Left" }` union. `DerivationIndex` is
+        // `u32` on the wire this host speaks; the tagged form belongs to
+        // `@parity/truapi` ≥ 0.6, which this app is pinned below on purpose —
+        // see the pin note in `network.ts`.
+        { tag: "SmartContractAllowance", value: CONTRACT_ACCOUNT_INDEX },
+        // `AutoSigning` is not optional the way the allowances are, and the
+        // distinction is stated in the SDK's own generated wire types: the slot
+        // allowances are "opportunistic and the host may also fulfil the
+        // allowance implicitly on the first submission", whereas "`AutoSigning`
+        // must be requested explicitly through this call".
+        //
+        // It was missing, and its absence matches the failure exactly. Every
+        // step of a submit that needs no signature works through Polkadot
+        // Desktop — the board reads, the allowance grant, the pallet-revive
+        // mapping check, and the contract dry-run, which returns a real gas
+        // estimate. The single step that needs one, `.tx()`, is accepted and
+        // then never answered, and re-reading `usedSession` minutes later shows
+        // the transaction never reached the chain at all.
+        //
+        // The guide asks for it here for the same reason this comment does:
+        // "before any signing call is made".
+        { tag: "AutoSigning", value: undefined },
+      ]);
+      if (signal.aborted) return;
+      // `AllocationOutcome` is a plain string union — "Allocated" | "Rejected" |
+      // "NotAvailable" — so this compares values, not tagged objects.
+      if (outcomes.some((o) => o !== "Allocated")) {
+        console.warn("[rainbow] contract allowance not granted at connect:", outcomes);
+      }
+    } catch (cause) {
+      // Swallowed deliberately: the ctx-bound helper throws rather than
+      // returning a Result, and a throw here would be logged and dropped by the
+      // SDK anyway. The submit path reports this properly.
+      console.warn("[rainbow] contract allowance request failed at connect:", cause);
+    }
+  },
 });
 
 /**

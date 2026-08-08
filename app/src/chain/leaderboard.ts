@@ -11,91 +11,22 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import type { Attestation } from "./enclave";
 
-// The deployed Leaderboard address, chosen by the build's target network.
-// Re-exported here so existing importers keep working; `network.ts` owns it,
-// because the address and the chain it lives on must never be picked apart.
-export { CONTRACT } from "./network";
+// The failure vocabulary lives in `revert.ts`; re-exported so callers keep
+// reaching for one module when they talk to this contract.
+export { revertMessage } from "./revert";
 
-/**
- * Minimal ABI — only what this app calls.
- *
- * Hand-written rather than pulled from forge's output so the bundle carries a
- * few hundred bytes instead of the full artifact. The tuple's field order is
- * load-bearing: EIP-712 encodes positionally, so a reordering here would
- * produce a digest the contract does not recognise.
- */
-export const LEADERBOARD_ABI = [
-  {
-    type: "function",
-    name: "submit",
-    stateMutability: "nonpayable",
-    inputs: [
-      {
-        name: "c",
-        type: "tuple",
-        components: [
-          { name: "player", type: "address" },
-          { name: "gameId", type: "uint64" },
-          { name: "score", type: "uint64" },
-          { name: "epoch", type: "uint64" },
-          { name: "k", type: "uint32" },
-          { name: "rulesHash", type: "bytes32" },
-          { name: "expiry", type: "uint64" },
-        ],
-      },
-      { name: "signature", type: "bytes" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "best",
-    stateMutability: "view",
-    inputs: [
-      { name: "gameId", type: "uint64" },
-      { name: "player", type: "address" },
-    ],
-    outputs: [{ type: "uint64" }],
-  },
-  {
-    type: "function",
-    name: "playerCount",
-    stateMutability: "view",
-    inputs: [{ name: "gameId", type: "uint64" }],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    // The output *names* are load-bearing, not documentation: the SDK decodes a
-    // multi-output call into an object keyed by them, so dropping them would
-    // hand back `{_0, _1}` instead of `{players, scores}`.
-    type: "function",
-    name: "board",
-    stateMutability: "view",
-    inputs: [
-      { name: "gameId", type: "uint64" },
-      { name: "offset", type: "uint256" },
-      { name: "limit", type: "uint256" },
-    ],
-    outputs: [
-      { name: "players", type: "address[]" },
-      { name: "scores", type: "uint64[]" },
-    ],
-  },
-  {
-    type: "function",
-    name: "currentEpoch",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint64" }],
-  },
-  {
-    type: "function",
-    name: "gameRules",
-    stateMutability: "view",
-    inputs: [{ name: "gameId", type: "uint64" }],
-    outputs: [{ type: "bytes32" }],
-  },
-] as const;
+// The deployed Leaderboard address. Re-exported here so existing importers keep
+// working; `contract.ts` owns it, because it comes out of `cdm.json` alongside
+// the ABI and the two must never be picked apart.
+export { CONTRACT } from "./contract";
+
+// The ABI used to live here — ~150 hand-written lines, "minimal" on the grounds
+// that the bundle should carry a few hundred bytes instead of the full artifact.
+// It is now `cdm.json`'s, via `contract.ts`. The saving was real but the cost
+// was not visible: the table declared nine errors and the deployed contract has
+// thirteen, so four of them reached a player as raw selectors, and every call
+// site had to cast the handle to `Record<string, unknown>` because a
+// hand-written array carries no types.
 
 /** Ethereum address for a secp256k1 public key. */
 export function addressOf(pub: string): string {

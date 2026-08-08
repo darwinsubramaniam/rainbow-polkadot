@@ -35,7 +35,21 @@ import { CONTRACT } from "./leaderboard";
 
 /** Mirrors the deployment the real enclave is configured for (docs/deployment-devnet.md). */
 const CHAIN_ID = 420420417n;
-const GAME_ID = 1;
+/**
+ * The game this simulator claims to attest.
+ *
+ * **Two**, matching the deployed verifier and the registered board. This said
+ * `1` until 2026-08-05, which was the E0.2 ruleset and is registered on no
+ * deployment — so every simulated run announced "the board shown is game 2, but
+ * this enclave attests game 1", a warning that was perfectly correct and
+ * pointed at this constant rather than at anything real.
+ *
+ * It is a literal rather than `GAME_ID` from `network.ts` on purpose: this file
+ * exists to be a *second* implementation of the verifier, and reading the
+ * board's own constant would make the two agree by construction instead of by
+ * being right. The mismatch warning is worth keeping able to fire.
+ */
+const GAME_ID = 2;
 const TTL_SECONDS = 86_400;
 
 /**
@@ -193,16 +207,28 @@ const sessionIdFor = (player: string, epoch: number, k: number) =>
 const sign = (digest: Uint8Array) => secp256k1.sign(digest, DEV_KEY, { prehash: false });
 
 /**
- * The seed for a session.
+ * The seed for a session — the level everyone playing this slot will face.
  *
  * Structurally what the enclave does: hash a domain-separated preimage, sign it
  * with the attestation key, and take the first eight bytes of the hash of that
  * signature. Deterministic signing is what makes it a PRF rather than a coin
  * flip. Here it is a PRF the player can evaluate offline, since they have the
  * key — one more reason this is a development aid and not a verifier.
+ *
+ * Keyed on `(epoch, k)` and **not** the player, matching `deriveSeed` in
+ * `acurast-verifier/app/verifier.mjs`, where the reasoning lives. This has to
+ * track that function exactly: the two are separate implementations of one
+ * scheme, and a divergence would not fail loudly — the simulator would simply
+ * hand out a different level than the deployed enclave, and every run against it
+ * would look like a working practice run right up until nothing landed.
+ *
+ * Note that the *level* is now shared while the seed's secrecy is not what
+ * protects anything. This mock signs with a key printed in this repository, so
+ * its levels differ from the real enclave's regardless; that is why simulated
+ * runs get their own storage slot and are never submitted.
  */
-function deriveSeed(sessionId: string): bigint {
-  const material = keccak_256(cat(utf8("rainbow-seed-v1"), bytes(sessionId)));
+function deriveSeed(epoch: number, k: number): bigint {
+  const material = keccak_256(cat(utf8("rainbow-seed-v2"), word(epoch), word(k)));
   const h = keccak_256(sign(material));
   return new DataView(h.buffer, h.byteOffset, h.byteLength).getBigUint64(0, true);
 }
@@ -277,8 +303,10 @@ export function simulatedEnclave(): Enclave {
         player,
         epoch,
         k,
+        // `sessionId` still binds the *slot* to this player — that is what the
+        // contract spends. Only the level is shared.
         sessionId,
-        seed: deriveSeed(sessionId).toString(),
+        seed: deriveSeed(epoch, k).toString(),
         gameId: GAME_ID,
         rulesHash,
         maxSessionsPerEpoch: MAX_ATTEMPTS,
@@ -292,7 +320,7 @@ export function simulatedEnclave(): Enclave {
       if (epoch > epochNow()) throw new Error("epoch in the future");
 
       const sessionId = sessionIdFor(player, epoch, k);
-      const out = replay(replayer, deriveSeed(sessionId), inputLog);
+      const out = replay(replayer, deriveSeed(epoch, k), inputLog);
 
       // The score is whatever the replay produced. As upstream, no claimed
       // value is accepted, so there is nothing here to be fooled by.

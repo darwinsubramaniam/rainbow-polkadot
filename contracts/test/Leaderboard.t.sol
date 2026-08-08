@@ -102,12 +102,14 @@ contract LeaderboardTest is Test {
     function test_acceptsAValidAttestation() public {
         Leaderboard.ScoreClaim memory c = _claim(alice, 1000, board.currentEpoch(), 0);
         bytes32 sid = board.sessionIdFor(alice, c.epoch, c.k);
+        uint64 day = board.dayOf(c.epoch);
 
-        vm.expectEmit(true, true, false, true);
-        emit Leaderboard.NewBest(GAME, alice, 1000, sid, c.epoch);
+        vm.expectEmit(true, true, true, true);
+        emit Leaderboard.ScoreRecorded(GAME, day, alice, 1000, sid, c.epoch);
         _submit(c);
 
         assertEq(board.best(GAME, alice), 1000);
+        assertEq(board.dailyBest(GAME, day, alice), 1000, "both boards, one submission");
         assertTrue(board.usedSession(sid));
     }
 
@@ -243,7 +245,7 @@ contract LeaderboardTest is Test {
     }
 
     function test_improvingDoesNotEnrolTwice() public {
-        // The whole reason enrolment is keyed on `best == 0`: a player who improves
+        // The whole reason enrolment is keyed on an explicit flag: a player who submits
         // eleven times must appear once, or the board fills with one name.
         uint64 e = board.currentEpoch();
         _submit(_claim(alice, 100, e, 0));
@@ -359,6 +361,162 @@ contract LeaderboardTest is Test {
     }
 
     // -----------------------------------------------------------------------
+    // The daily board
+    // -----------------------------------------------------------------------
+
+    function test_dayIsDerivedFromTheSignedEpoch() public view {
+        // Load-bearing: because the day comes out of `c.epoch`, which the enclave
+        // already signs, the daily board needs no new claim field — so SCORE_TYPEHASH,
+        // every digest, and the verifier job are all untouched by this feature.
+        assertEq(board.currentDay(), board.currentEpoch() / 24);
+        assertEq(board.dayOf(board.currentEpoch()), board.currentDay());
+    }
+
+    function test_dailyBoardIsEmptyBeforeAnyoneScores() public view {
+        uint64 day = board.currentDay();
+        assertEq(board.dailyPlayerCount(GAME, day), 0);
+        (address[] memory players, uint64[] memory scores) = board.dailyBoard(GAME, day, 0, 10);
+        assertEq(players.length, 0);
+        assertEq(scores.length, 0);
+    }
+
+    function test_dailyBoardResetsAndTheAllTimeBoardDoesNot() public {
+        // The whole point of the split. One submission today; tomorrow the daily board
+        // is empty for that player while their all-time best is exactly where it was.
+        uint64 today = board.currentDay();
+        _submit(_claim(alice, 900, board.currentEpoch(), 0));
+
+        assertEq(board.dailyBest(GAME, today, alice), 900);
+        assertEq(board.dailyPlayerCount(GAME, today), 1);
+
+        vm.warp(block.timestamp + 1 days);
+        uint64 tomorrow = board.currentDay();
+        assertTrue(tomorrow != today, "the warp must actually cross a boundary");
+
+        assertEq(board.dailyBest(GAME, tomorrow, alice), 0, "today starts empty");
+        assertEq(board.dailyPlayerCount(GAME, tomorrow), 0);
+        assertEq(board.best(GAME, alice), 900, "all-time survives the reset");
+        assertEq(board.playerCount(GAME), 1);
+
+        // And yesterday is still readable — nothing is deleted, it just stops being
+        // the board anyone asks for.
+        assertEq(board.dailyBest(GAME, today, alice), 900);
+    }
+
+    function test_scoreIsFiledUnderThePlayDayNotTheSubmitDay() public {
+        // A run finished at 23:59 belongs to that day even if the transaction lands two
+        // minutes later. The alternative — dating by `block.timestamp` — would let the
+        // network's latency decide which board a player competed on.
+        uint64 playEpoch = board.currentEpoch();
+        uint64 playDay = board.dayOf(playEpoch);
+
+        Leaderboard.ScoreClaim memory c = _claim(alice, 700, playEpoch, 0);
+        bytes memory sig = _sign(verifierKey, c);
+
+        vm.warp(block.timestamp + 1 days); // still inside the attestation's expiry
+        assertTrue(board.currentDay() != playDay, "submitting on a later day");
+        assertLe(block.timestamp, c.expiry, "and the attestation is still valid");
+
+        board.submit(c, sig);
+
+        assertEq(board.dailyBest(GAME, playDay, alice), 700, "credited to the day played");
+        assertEq(board.dailyBest(GAME, board.currentDay(), alice), 0, "not to the day submitted");
+    }
+
+    function test_dailyBestIsTheMaximumWithinTheDay() public {
+        uint64 e = board.currentEpoch();
+        uint64 day = board.dayOf(e);
+
+        _submit(_claim(alice, 300, e, 0));
+        _submit(_claim(alice, 100, e, 1));
+        _submit(_claim(alice, 800, e, 2));
+
+        assertEq(board.dailyBest(GAME, day, alice), 800);
+        assertEq(board.dailyPlayerCount(GAME, day), 1, "one row per player per day");
+    }
+
+    function test_dailyBoardReadsScoresLiveAndPagesLikeTheAllTimeBoard() public {
+        uint64 e = board.currentEpoch();
+        uint64 day = board.dayOf(e);
+        for (uint160 i = 1; i <= 5; ++i) {
+            _submit(_claim(address(i), uint64(i) * 10, e, 0));
+        }
+        assertEq(board.dailyPlayerCount(GAME, day), 5);
+
+        (address[] memory first,) = board.dailyBoard(GAME, day, 0, 2);
+        assertEq(first.length, 2);
+        assertEq(first[0], address(uint160(1)), "insertion order, not rank order");
+
+        (address[] memory last, uint64[] memory lastScores) = board.dailyBoard(GAME, day, 4, 2);
+        assertEq(last.length, 1, "a limit past the end clamps");
+        assertEq(lastScores[0], 50);
+
+        (address[] memory none,) = board.dailyBoard(GAME, day, 99, 10);
+        assertEq(none.length, 0, "an offset past the end is empty, not a revert");
+
+        (address[] memory all, uint64[] memory scores) = board.dailyBoard(GAME, day, 0, 10);
+        for (uint256 i; i < all.length; ++i) {
+            assertEq(scores[i], board.dailyBest(GAME, day, all[i]), "must agree with dailyBest");
+        }
+    }
+
+    function test_dailyRostersAreKeyedByGameAndDay() public {
+        uint64 other = 2;
+        bytes32 otherRules = keccak256("sim-v2");
+        board.registerGame(other, otherRules);
+
+        uint64 e = board.currentEpoch();
+        uint64 day = board.dayOf(e);
+        _submit(_claim(alice, 100, e, 0));
+
+        Leaderboard.ScoreClaim memory c = _claim(bob, 7, e, 0);
+        c.gameId = other;
+        c.rulesHash = otherRules;
+        _submit(c);
+
+        assertEq(board.dailyPlayerCount(GAME, day), 1);
+        assertEq(board.dailyPlayerCount(other, day), 1);
+
+        (address[] memory g1,) = board.dailyBoard(GAME, day, 0, 10);
+        (address[] memory g2,) = board.dailyBoard(other, day, 0, 10);
+        assertEq(g1[0], alice);
+        assertEq(g2[0], bob);
+    }
+
+    function test_aZeroScoreEnrolsExactlyOnce() public {
+        // The bug that dropping the improvement check would have introduced. A run
+        // where the player never moves right scores exactly zero, and the old
+        // enrolment test — `best == 0` means "never scored here" — was exact only
+        // while `score > best` was required. Without the explicit flag, each of these
+        // would push alice onto both rosters again.
+        uint64 e = board.currentEpoch();
+        uint64 day = board.dayOf(e);
+
+        _submit(_claim(alice, 0, e, 0));
+        _submit(_claim(alice, 0, e, 1));
+        _submit(_claim(alice, 0, e, 2));
+
+        assertEq(board.best(GAME, alice), 0);
+        assertEq(board.playerCount(GAME), 1, "enrolled once despite a zero best");
+        assertEq(board.dailyPlayerCount(GAME, day), 1);
+
+        (address[] memory players, uint64[] memory scores) = board.board(GAME, 0, 10);
+        assertEq(players.length, 1);
+        assertEq(players[0], alice);
+        assertEq(scores[0], 0);
+    }
+
+    function test_rejectedSubmissionsDoNotEnrolOnEitherBoard() public {
+        uint64 e = board.currentEpoch();
+        uint64 day = board.dayOf(e);
+        Leaderboard.ScoreClaim memory c = _claim(alice, 100, e, 0);
+        _expectRevertSignedBy(Leaderboard.BadAttestation.selector, rogueKey, c);
+
+        assertEq(board.playerCount(GAME), 0);
+        assertEq(board.dailyPlayerCount(GAME, day), 0);
+    }
+
+    // -----------------------------------------------------------------------
     // Replay, expiry, monotonicity
     // -----------------------------------------------------------------------
 
@@ -385,13 +543,29 @@ contract LeaderboardTest is Test {
         assertEq(board.best(GAME, alice), 100);
     }
 
-    function test_rejectsAScoreThatDoesNotImprove() public {
+    function test_recordsAScoreThatDoesNotImprove() public {
+        // The behaviour this contract exists to demonstrate: a run that beats nothing
+        // still lands a transaction, still consumes its session, and still leaves the
+        // board holding the better number.
         uint64 e = board.currentEpoch();
+        uint64 day = board.dayOf(e);
         _submit(_claim(alice, 500, e, 0));
 
-        _expectRevert(Leaderboard.NotAnImprovement.selector, _claim(alice, 400, e, 1));
-        // equal is not an improvement either
-        _expectRevert(Leaderboard.NotAnImprovement.selector, _claim(alice, 500, e, 2));
+        _submit(_claim(alice, 400, e, 1));
+        assertEq(board.best(GAME, alice), 500, "a weaker run must not overwrite");
+        assertTrue(board.usedSession(board.sessionIdFor(alice, e, 1)), "but it is consumed");
+
+        // Equal is not an improvement either, and is likewise recorded rather than
+        // refused. This is the case that used to strand a player for a whole epoch:
+        // replaying a held seed to the same score reverted and consumed nothing, so the
+        // same seed came back forever.
+        _submit(_claim(alice, 500, e, 2));
+        assertEq(board.best(GAME, alice), 500);
+        assertEq(board.dailyBest(GAME, day, alice), 500);
+        assertTrue(board.usedSession(board.sessionIdFor(alice, e, 2)));
+
+        assertEq(board.playerCount(GAME), 1, "three submissions, one row");
+        assertEq(board.dailyPlayerCount(GAME, day), 1);
     }
 
     // -----------------------------------------------------------------------
@@ -637,19 +811,26 @@ contract LeaderboardTest is Test {
     // Fuzz
     // -----------------------------------------------------------------------
 
-    function testFuzz_onlyImprovementsEverLand(uint64 first, uint64 second) public {
-        vm.assume(first > 0);
+    function testFuzz_everySubmissionLandsAndBestIsTheMaximum(uint64 first, uint64 second)
+        public
+    {
+        // No `vm.assume` on either score, including zero: the point of the change is
+        // that there is no score the contract refuses.
         uint64 e = board.currentEpoch();
-        _submit(_claim(alice, first, e, 0));
+        uint64 day = board.dayOf(e);
 
-        Leaderboard.ScoreClaim memory c = _claim(alice, second, e, 1);
-        if (second > first) {
-            _submit(c);
-            assertEq(board.best(GAME, alice), second);
-        } else {
-            _expectRevert(Leaderboard.NotAnImprovement.selector, c);
-            assertEq(board.best(GAME, alice), first);
-        }
+        _submit(_claim(alice, first, e, 0));
+        _submit(_claim(alice, second, e, 1));
+
+        uint64 expected = second > first ? second : first;
+        assertEq(board.best(GAME, alice), expected);
+        assertEq(board.dailyBest(GAME, day, alice), expected);
+        assertEq(board.playerCount(GAME), 1, "two submissions, one row, any scores");
+        assertEq(board.dailyPlayerCount(GAME, day), 1);
+    }
+
+    function testFuzz_dayIsEpochOverTwentyFour(uint64 epoch) public view {
+        assertEq(board.dayOf(epoch), epoch / 24);
     }
 
     function testFuzz_sessionIdIsInjective(address p1, uint64 e1, uint32 k1, uint64 e2, uint32 k2)

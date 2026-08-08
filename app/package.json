@@ -19,9 +19,10 @@
   "dependencies": {
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
-    "@parity/product-sdk": "*",
+    "@parity/product-sdk": "0.19.1",
     "@parity/product-sdk-descriptors": "^0.8.0",
-    "@parity/product-sdk-tx": "^0.3.2",
+    "@parity/product-sdk-tx": "0.3.2",
+    "@parity/truapi": "0.5.1",
     "@xyflow/react": "^12.11.2",
     "pixi.js": "^8.6.0",
     "react": "^19.2.8",

@@ -21,7 +21,7 @@ game — it checks that the attestation is well-formed, fresh, unspent, from a t
 signer, and an actual improvement.
 
 Ranking is **not** on-chain. Insertion into a sorted array is unbounded gas; clients rank
-off-chain from `NewBest` events.
+off-chain from `ScoreRecorded` events.
 
 ## The two defects this fixes
 

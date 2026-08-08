@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { HISTORY_CAP, markLanded, personalBest, remember, type RunRecord } from "./history.ts";
+import { HISTORY_CAP, markLanded, remember, standings, type RunRecord } from "./history.ts";
 
 /**
  * The personal board is the one list in the app the chain cannot correct. If it
@@ -60,6 +60,28 @@ describe("remember", () => {
     assert.equal(list[0]?.score, "500");
   });
 
+  it("lets an attested run replace a higher local one", () => {
+    // The disagreement case, and the reason score alone cannot decide the
+    // merge: this device counted 900, the enclave signed 700, and 700 is the
+    // only number the contract would ever take. Keeping 900 would store a score
+    // no chain will accept, in a list that claims the enclave stands behind it.
+    let list = remember([], run({ score: "900", attested: false }));
+    list = remember(list, run({ score: "700", at: 2_000, agreed: false }));
+
+    assert.equal(list.length, 1);
+    assert.equal(list[0]?.score, "700");
+    assert.notEqual(list[0]?.attested, false);
+  });
+
+  it("does not let a later local run displace the attested one", () => {
+    // The same rule in the other direction: replaying a slot offline after it
+    // was attested must not overwrite the signed number with a browser's own.
+    let list = remember([], run({ score: "700" }));
+    list = remember(list, run({ score: "900", at: 2_000, attested: false }));
+
+    assert.equal(list[0]?.score, "700");
+  });
+
   it("compares scores numerically, not as strings", () => {
     // "9" > "10" lexicographically, which would keep the wrong run.
     const list = remember(remember([], run({ score: "9" })), run({ score: "10", at: 2_000 }));
@@ -99,7 +121,7 @@ describe("markLanded", () => {
   });
 });
 
-describe("personalBest", () => {
+describe("standings", () => {
   const list: RunRecord[] = [
     run({ score: "300", k: 0, at: 1 }),
     run({ score: "1200", k: 1, at: 2 }),
@@ -109,30 +131,32 @@ describe("personalBest", () => {
 
   it("ranks the player's own runs, highest first", () => {
     assert.deepEqual(
-      personalBest(list, PLAYER).map((r) => r.score),
+      standings(list, PLAYER, null).map((r) => r.score),
       ["1200", "300", "80"],
     );
   });
 
   it("never shows another account's runs", () => {
     assert.deepEqual(
-      personalBest(list, OTHER).map((r) => r.score),
+      standings(list, OTHER, null).map((r) => r.score),
       ["99999"],
     );
   });
 
   it("is empty with no account, rather than showing everyone", () => {
-    assert.deepEqual(personalBest(list, null), []);
+    assert.deepEqual(standings(list, null, 500n), []);
   });
 
   it("matches an address regardless of case", () => {
-    assert.equal(personalBest(list, PLAYER.toUpperCase()).length, 3);
+    assert.equal(standings(list, PLAYER.toUpperCase(), null).length, 3);
   });
 
   it("sorts u64 scores by value", () => {
+    // "9" > "10" as strings, and a leaderboard that sorted that way would be
+    // wrong in exactly the direction nobody checks.
     const big = [run({ score: "9", k: 0 }), run({ score: "10", k: 1 })];
     assert.deepEqual(
-      personalBest(big, PLAYER).map((r) => r.score),
+      standings(big, PLAYER, null).map((r) => r.score),
       ["10", "9"],
     );
   });
@@ -140,14 +164,66 @@ describe("personalBest", () => {
   it("breaks ties with the newer run", () => {
     const tied = [run({ score: "5", k: 0, at: 10 }), run({ score: "5", k: 1, at: 20 })];
     assert.deepEqual(
-      personalBest(tied, PLAYER).map((r) => r.k),
-      [1, 0],
+      standings(tied, PLAYER, null).map((r) => r.at),
+      [20, 10],
     );
   });
 
   it("takes only the top n", () => {
     const many = Array.from({ length: 20 }, (_, i) => run({ score: String(i), k: i, at: i }));
-    assert.equal(personalBest(many, PLAYER).length, 10);
-    assert.equal(personalBest(many, PLAYER, 3)[0]?.score, "19");
+    assert.equal(standings(many, PLAYER, null).length, 10);
+    assert.equal(standings(many, PLAYER, null, 3)[0]?.score, "19");
+  });
+
+  it("adds the chain's best as a row of its own", () => {
+    // The case that motivated merging at all: a score landed from another
+    // device, or before this browser's history was cleared. Nothing local knows
+    // about it, and the panel header already claims it.
+    const rows = standings([run({ score: "300", k: 0 })], PLAYER, 1600n);
+    assert.deepEqual(
+      rows.map((r) => [r.source, r.score]),
+      [
+        ["chain", "1600"],
+        ["enclave", "300"],
+      ],
+    );
+  });
+
+  it("does not list a landed run twice", () => {
+    // The most common case of all: the best on-chain *is* the run this device
+    // landed. One achievement, one row.
+    const landed = [run({ score: "1600", k: 0, landed: true })];
+    const rows = standings(landed, PLAYER, 1600n);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.source, "enclave");
+    assert.equal(rows[0]?.landed, true);
+  });
+
+  it("still shows the chain row when a local run ties it but never landed", () => {
+    // Same number, different facts: an unlanded local run is not evidence that
+    // the chain's best came from here, and collapsing them would erase one.
+    const rows = standings([run({ score: "1600", k: 0, landed: false })], PLAYER, 1600n);
+    assert.deepEqual(
+      rows.map((r) => r.source),
+      ["chain", "enclave"],
+    );
+  });
+
+  it("omits a zero best rather than showing a row for no score", () => {
+    assert.deepEqual(standings([], PLAYER, 0n), []);
+  });
+
+  it("marks a run the enclave never saw as this device's own", () => {
+    const rows = standings([run({ score: "300", attested: false })], PLAYER, null);
+    assert.equal(rows[0]?.source, "device");
+    // `agreed: false` on an unattested record means "no verdict", not
+    // "mismatch" — a row tagged both would accuse the enclave of nothing.
+    assert.equal(rows[0]?.disagreed, false);
+  });
+
+  it("reports a real disagreement, which only an attested run can have", () => {
+    const rows = standings([run({ score: "300", agreed: false })], PLAYER, null);
+    assert.equal(rows[0]?.source, "enclave");
+    assert.equal(rows[0]?.disagreed, true);
   });
 });

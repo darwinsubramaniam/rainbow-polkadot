@@ -3,7 +3,14 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App";
 import { SdkGate } from "./SdkGate";
+import { buildLine } from "./build";
 import "./styles.css";
+
+// First line in the console, before anything can fail. A stale service worker
+// or a CID pinned in the gateway URL will serve an old bundle through a normal
+// reload, and every symptom then belongs to code that is no longer on disk —
+// so the very first thing any session says is which build is talking.
+console.warn(`[rainbow] ${buildLine()}`);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root missing");

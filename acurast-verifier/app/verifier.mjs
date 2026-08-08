@@ -155,19 +155,65 @@ const sessionIdFor = (player, epoch, k) =>
 /**
  * Derive a run's seed inside the enclave.
  *
- * `signer_sign` is deterministic (RFC 6979 — measured in E0.3) and its private
- * key never leaves the secure element, so signing a domain-separated message
- * acts as a PRF the player cannot evaluate offline. That is what stops seed
- * shopping: sessionId is public, but the seed it maps to is not.
+ * **The player is deliberately not in the preimage.** It used to be — this took
+ * `sessionId`, which is `keccak256(player, epoch, k)` — and that gave every
+ * player their own private level for every slot. Two things were wrong with it,
+ * and only the second was obvious.
  *
- * Caveat worth stating: this reuses the attestation key as a PRF. The distinct
- * "rainbow-seed-v1" prefix keeps the preimages disjoint from any EIP-712 digest,
- * so it cannot be coerced into producing an attestation — but a separate HD-derived
- * key (signer_sign supports derivationPath on secp256k1) would be cleaner.
+ * The first: a leaderboard that ranks scores earned on different levels ranks
+ * the draw as much as the play. Measured over 20,000 seeds from this exact
+ * `sim.wasm`, a level carries 17–56 coins and 0–17 enemies, so a *perfect* run
+ * is worth between 5,100 and 11,000 points depending on nothing the player did.
+ * The p5–p95 spread is 2,500 on a median of 7,700. Comparing those numbers to
+ * each other was never meaningful.
+ *
+ * The second: it was not even sound as anti-grinding. `maxSessionsPerEpoch`
+ * caps seeds per *address*, `/session` is unauthenticated and will derive for
+ * any address you name, `sim.wasm` is published, and the contract credits the
+ * `player` inside the signed claim rather than `msg.sender`. So the attack was:
+ * mint a thousand addresses, pull twelve seeds each, generate all twelve
+ * thousand levels locally, play the friendliest, and be credited to whichever
+ * address drew it. Addresses are free; the cap bounded nothing.
+ *
+ * Keying on `(epoch, k)` alone fixes both. Everyone faces the same twelve levels
+ * per hour, which makes the boards comparable and leaves an address-farmer with
+ * nothing to shop for.
+ *
+ * ## What it costs, stated plainly
+ *
+ * Levels become public knowledge the moment anyone asks for one, and an input
+ * log is now portable: a route another player found and published can be
+ * replayed by anyone, attested, and submitted under their own address for the
+ * same score. Under per-player seeds that log was meaningless to anyone else.
+ *
+ * This is the daily-puzzle trade and it is taken knowingly. Copying still spends
+ * one of the copier's twelve slots, so it is not free, and an attested replay of
+ * someone else's route is in any case indistinguishable from playing it well.
+ * What is bought in exchange is a board where two scores mean the same thing.
+ *
+ * ## What has not changed
+ *
+ * `signer_sign` is deterministic (RFC 6979 — measured in E0.3) and its private
+ * key never leaves the secure element, so this is still a PRF nobody can
+ * evaluate offline. That no longer buys secrecy, since anyone may ask for any
+ * `(epoch, k)`; it buys unforgeability — no client can invent a seed and have
+ * the enclave replay against it.
+ *
+ * Note the corollary: the key is per-deployment, so a redeployed verifier serves
+ * *different* levels for the same `(epoch, k)`. That was always true and was
+ * invisible while seeds were per-player; under shared seeds it means two live
+ * verifiers would disagree about what today's levels are. Use `reuseKeysFrom`
+ * across redeployments if that matters.
+ *
+ * The prefix is bumped to `-v2` so the two schemes can never share a preimage,
+ * and this reuses the attestation key as a PRF — the distinct prefix keeps it
+ * disjoint from any EIP-712 digest, so it cannot be coerced into producing an
+ * attestation, but a separate HD-derived key (signer_sign supports
+ * derivationPath on secp256k1) would be cleaner.
  */
-async function deriveSeed(sessionId) {
+async function deriveSeed(epoch, k) {
   const material = keccak_256(
-    cat(new TextEncoder().encode("rainbow-seed-v1"), hexToBytes(sessionId)),
+    cat(new TextEncoder().encode("rainbow-seed-v2"), word(epoch), word(k)),
   );
   const sig = await sign(bytesToHex(material));
   if (!sig) throw new Error("seed derivation failed: signer_sign returned nothing");
@@ -227,7 +273,9 @@ async function attest({player, epoch, k, inputLog}) {
   if (!(k >= 0 && k < MAX_SESSIONS_PER_EPOCH)) throw new Error("session index out of range");
 
   const sessionId = sessionIdFor(player, e, k);
-  const seed = await deriveSeed(sessionId);
+  // The seed is the level, and the level is shared; `sessionId` still binds the
+  // *slot* to this player, which is what the contract spends.
+  const seed = await deriveSeed(e, k);
 
   const result = replay(seed, inputLog);
   if (result.rejected !== undefined) {
@@ -278,31 +326,34 @@ async function attest({player, epoch, k, inputLog}) {
  * Hand out the seed for a session so the client can actually play it.
  *
  * The level is generated from the seed, so without this the player has nothing
- * to render. That makes the seed a thing we must *release* rather than keep —
- * but only on terms that preserve the anti-grinding property:
+ * to render.
  *
- *   - CURRENT EPOCH ONLY. This is the load-bearing restriction. `attest` and the
- *     contract both accept any epoch <= current, because a run played at the end
- *     of one epoch may legitimately be submitted in the next. Issuing *seeds* on
- *     those terms would be a different matter entirely: a player could walk back
- *     through every past epoch and harvest 12 seeds from each, sample them all
- *     offline, and play only the friendliest. Restricting issuance to the
- *     current epoch is what keeps the cap at {maxSessionsPerEpoch} per hour.
+ * Since {@link deriveSeed} stopped keying on the player, a seed is no longer
+ * anybody's secret: the twelve levels of an epoch are the same twelve for
+ * everyone, and this endpoint hands them to whoever asks. That is a deliberate
+ * property, not a leak — the whole point is that two scores on the board were
+ * earned on the same level. The restrictions below are what remain, and what
+ * they still buy:
+ *
+ *   - CURRENT EPOCH ONLY, still load-bearing but for a narrower reason. `attest`
+ *     and the contract both accept any epoch <= current, because a run played at
+ *     the end of one epoch may legitimately be submitted in the next. Issuing
+ *     *seeds* on those terms would let anyone walk back through every past epoch
+ *     and harvest levels to practise on before spending a slot. It no longer
+ *     stops level *shopping* — everyone gets the same level whether they look
+ *     first or not — but it keeps a slot a commitment rather than a preview.
  *
  *   - k < maxSessionsPerEpoch, matching the contract. A seed the contract would
  *     never accept a submission for is not worth deriving.
  *
- * Seeds stay unguessable regardless: `deriveSeed` is a signature under a key
- * inside the secure element, so knowing one seed says nothing about the next.
- * A player still cannot compute a seed offline — they can only ask for the
- * twelve they are entitled to and must play each one to find out what it holds.
+ * The `player` argument is now used only to compute the returned `sessionId`,
+ * which is what the *contract* spends; the seed ignores it. It is still
+ * validated as an H160 so a caller cannot be handed a session identifier the
+ * contract would never recognise.
  *
- * Known limitation, stated rather than hidden: requests are unauthenticated, so
- * anyone may ask for any address's seeds and learn which levels that player will
- * face. It consumes nothing (sessions are spent on-chain at submit, not here)
- * and any resulting score still credits the bound player, so it is an
- * information leak rather than a theft. Binding this to a wallet signature is
- * the obvious hardening and is not done here.
+ * `deriveSeed` remains a signature under a key inside the secure element, so
+ * nobody can compute a seed offline or invent one for the enclave to replay
+ * against. What that buys is now unforgeability rather than secrecy.
  */
 async function session({player, epoch, k}) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(player ?? "")) throw new Error("bad player address");
@@ -317,7 +368,7 @@ async function session({player, epoch, k}) {
   if (!(k >= 0 && k < MAX_SESSIONS_PER_EPOCH)) throw new Error("session index out of range");
 
   const sessionId = sessionIdFor(player, e, k);
-  const seed = await deriveSeed(sessionId);
+  const seed = await deriveSeed(e, k);
 
   return {
     player,

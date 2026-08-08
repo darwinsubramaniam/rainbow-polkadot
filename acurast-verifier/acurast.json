@@ -34,7 +34,7 @@
         "maxExecutionTimeInMs": 3600000
       },
       "maxAllowedStartDelayInMs": 60000,
-      "restartPolicy": "no",
+      "restartPolicy": "always",
       "mutability": "Immutable",
       "minProcessorReputation": 0,
       "usageLimit": {
@@ -42,8 +42,8 @@
         "maxNetworkRequests": 10,
         "maxStorage": 10000
       },
-      "maxCostPerExecution": 160000000000,
-      "onlyAttestedDevices": false,
+      "maxCostPerExecution": 360000000000,
+      "onlyAttestedDevices": true,
       "enableDevtools": false,
       "includeEnvironmentVariables": [
         "WEBHOOK_URL",

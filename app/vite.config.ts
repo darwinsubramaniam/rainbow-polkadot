@@ -1,5 +1,62 @@
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+/**
+ * A stamp identifying exactly which build is running.
+ *
+ * Earned the hard way. A published Product is served out of a service-worker
+ * VFS behind a gateway that can pin a CID in the URL, so an ordinary reload
+ * will happily keep serving a bundle from several deploys ago — and every
+ * symptom then belongs to code that is no longer on disk. Hours went into
+ * debugging a submit failure that had already been fixed and republished
+ * twice, because nothing on screen said which bundle was answering.
+ *
+ * So the answer ships *in* the bundle. Read it from the footer or the console
+ * before trusting any bug report, including your own.
+ *
+ * `sdk` is here because it is not incidental: the app talks to Polkadot Desktop
+ * over a versioned host protocol, and a mismatch between the two surfaces as a
+ * misaligned SCALE decode (`Unknown enum discriminant: N`, N varying per
+ * payload) rather than as anything resembling a version error.
+ *
+ * Note this makes builds non-reproducible on purpose — `at` changes every time,
+ * so every build is a distinct CID even when the source did not move. That is
+ * the point: a deploy you cannot tell apart from the last one is the failure
+ * being fixed. `sim.wasm` is untouched by this and still hashes to the on-chain
+ * `rulesHash`.
+ */
+function buildStamp() {
+  const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+
+  // Never let stamping break the build: outside a checkout (a tarball, a clean
+  // CI export) git is simply absent, and a missing sha is worth far less than a
+  // failed deploy.
+  const git = (cmd: string, fallback: string) => {
+    try {
+      return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    } catch {
+      return fallback;
+    }
+  };
+
+  const sha = git("git rev-parse --short HEAD", "nogit");
+  // Every deploy so far has been from a dirty tree, which makes the sha alone a
+  // half-truth — it names a commit the running code does not match.
+  const dirty = git("git status --porcelain", "") !== "" ? "+dirty" : "";
+
+  return {
+    version: pkg.version as string,
+    commit: `${sha}${dirty}`,
+    at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+    sdk: {
+      core: pkg.dependencies["@parity/product-sdk"] as string,
+      tx: pkg.dependencies["@parity/product-sdk-tx"] as string,
+    },
+  };
+}
 
 /**
  * Chain metadata this app actually connects to.
@@ -69,6 +126,12 @@ function dropUnusedChainMetadata(): Plugin {
 export default defineConfig({
   plugins: [react(), dropUnusedChainMetadata()],
 
+  // Inlined as a literal at build time, so it costs nothing at runtime and
+  // cannot be out of step with the bundle it is describing.
+  define: {
+    __BUILD__: JSON.stringify(buildStamp()),
+  },
+
   // Relative asset URLs. A published Product is resolved client-side by the
   // gateway and served out of a service-worker VFS rather than from a real
   // origin root, so absolute "/assets/…" paths do not reliably resolve.
@@ -82,6 +145,23 @@ export default defineConfig({
     // hash to the on-chain rulesHash.
     assetsInlineLimit: 0,
     target: "es2022",
+    // No source maps in a published build, and it is a close call.
+    //
+    // Against: a Product runs inside someone else's container and the only
+    // report you get is its console, which minified reads `TypeError: a is not
+    // a function` — no file, no line, no name. Resolving Polkadot Desktop's
+    // stack frames against *its* shipped maps is what finally located a fault
+    // that had cost most of a day.
+    //
+    // For: the Bulletin authorization is a byte quota **spent per deploy**, not
+    // a per-file cap. Measured, maps take this build from 4.1 MB to 13 MB — two
+    // thirds of the 20 MB budget in a single publish, on 50 `.map` files most of
+    // which describe generated chain metadata nobody will ever read.
+    //
+    // The deciding argument is that the debugging channel already exists and is
+    // free: Polkadot Desktop loads `localhost` directly, unminified, with real
+    // names in the stack. Reproduce there. Flip this to `true` only for a
+    // deliberate debugging build, and do not publish it.
     sourcemap: false,
   },
 

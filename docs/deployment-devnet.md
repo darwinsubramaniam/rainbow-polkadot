@@ -1,19 +1,43 @@
 # Deployment — Polkadot Products Devnet
 
-**Live** (2026-07-30). Deployed with `cdm`, verified on-chain.
+**Live** (2026-08-05). Deployed with `cdm`, verified on-chain.
+
+> **Redeployed 2026-08-05** for the daily board and the removal of the improvement check.
+> The previous contract was `0x891548f5268FA27B68553eb4841f9246b38A16fA`; scores standing
+> on it are not migrated and are not reachable from the app.
+>
+> Verified by reading `currentDay()` through `ReviveApi.call` on both addresses — `20670`
+> on the new one, empty on the old, which is how you tell the bytecode apart.
+>
+> **`cdm deploy` is not idempotent — it instantiates every time.** The first run
+> (`0xc4fac51758e92afe165409682b851fa9fa8178d0`) deployed and registered cleanly, then timed
+> out after 300s publishing the CDM package metadata to Bulletin. Re-running to retry the
+> publish deployed a *second* instance at the address above and published the metadata; it
+> did not repair the first. There is no metadata-only mode.
+>
+> So `0xc4fac517…` is an **orphan**: same bytecode, `registerGame(2, …)` applied, owner
+> correct, no metadata, and nothing points at it. It is harmless — no verifier is registered
+> on it, so it can never accept a score — but do not confuse the two when reading blocks
+> from 2026-08-05. If a future retry is needed, expect a third address and budget the
+> `registerGame` and `setVerifier` calls that follow it.
+>
+> **Toolchain note.** `cdm build` shells out to `forge --resolc`, which upstream Foundry
+> does not have. `~/.foundry/bin` shadows `~/.foundry-polkadot/bin` on this machine, so
+> `cdm` fails with `unexpected argument '--resolc'` until you prefix the call:
+> `PATH="$HOME/.foundry-polkadot/bin:$PATH" cdm deploy -n devnet`.
 
 | | |
 |---|---|
-| Contract | **`0x891548f5268FA27B68553eb4841f9246b38A16fA`** |
+| Contract | **`0xb359526f0ffa243678e7bed762c6fc96e45c9915`** |
 | CDM package | `@dw3labs/rainbow-leaderboard` |
 | Chain | Paseo Asset Hub, EVM chain id **420420417** |
 | Owner | `0x50AFf5a51BE03d5914D9b5A42c548Dc35A73f7D8` (mapped from `5GmrGRR2…`) |
-| Compiler | Resolc v1.4.0 + Solc v0.8.28 → 46.4 KB PolkaVM |
-| Metadata | `bafk2bzacebisdbwwcflbiqu3cptjyumw7enfbriwqswubvu5xp2msp64au3t2` |
+| Compiler | Resolc v1.4.0 + Solc v0.8.28 → 55.3 KB PolkaVM |
+| Metadata | `bafk2bzaced2n7a3tspv6jmznxmfgmlkktj42z4o6x2265vjcqzpzmsoanvx36` |
 | `epochSeconds` | 3600 |
 | `maxSessionsPerEpoch` | 12 |
-| Game **2** `rulesHash` | `0x02bdb80f1e5195422ac6204060295b6733e2fc1cef196fc49af654f970bd049b` |
-| Verifier | `0xce0d7dfaf3b8d377ced5ba25cb47f26d192e75d2` (registered in `#11595667`) |
+| Game **2** `rulesHash` | `0x02bdb80f1e5195422ac6204060295b6733e2fc1cef196fc49af654f970bd049b` (registered in `#11832873`) |
+| Verifier | `0xb956b535a026e14469bba04103de209b4985a727` (job 380426, registered in `#11833581`) |
 
 `rulesHash` is `keccak256(sim.wasm)` over the current 33,599-byte artifact
 (`sha256 134633be…`). The rules *are* that artifact, so the board is pinned to a simulation
@@ -26,7 +50,76 @@ that rulesHash, and it is the verifier that decides what a landed score means. G
 advertise a board nobody can play. `app/src/chain/network.ts` therefore defaults
 `GAME_ID` to 2.
 
-## The verifier had to be repointed (done: job 380406)
+## The verifier redeploy — done, and the key rotated as expected
+
+**Job 380426**, canary, processor `5CHmRH4ceUVcjqNG3vkkDLk3NoLfkKMdyyqLKVVMzRbR5rdq`,
+bundle `ipfs://QmRP4dSQR9FUHsWaGsGRgtGaPtqPRWw4qvLyBBTv9LVp3m`. It reports
+`contract: 0xb359526f…`, `gameId: 2`, `rulesHash: 0x02bdb80f…`, and signs as
+`0xb956b535a026e14469bba04103de209b4985a727` — registered with `setVerifier` in `#11833581`
+and read back as `isVerifier == 1`.
+
+The previous key `0x5332edf5…` is deliberately **not** registered: it serves the old
+`rainbow-seed-v1` per-player levels and was bound to `0x891548f5…`.
+
+### Three things that cost time, recorded so they do not twice
+
+**`maxCostPerExecution` must clear the processor's live price, and the failure names neither.**
+Registration was rejected twice with `acurastMarketplace.InsufficientRewardInMatch` — "Match
+is invalid due to insufficient reward regarding the current source pricing" — at
+`32003610000` and again at `64000000000`. It went through at `160000000000`, the value in
+git. The error reports no price and no shortfall, so the only method is to raise and retry;
+start from the committed value rather than bisecting upward. A cap is a ceiling, not a
+charge.
+
+**`acurast deployments ls` is down on every network.** `-n canary` returns `fetch failed`,
+`-n mainnet` returns an HTML error page parsed as JSON, `-n devnet` throws. So the documented
+"read the key off the assignment" step was unavailable, and the signing key was taken from
+the job's own `GET /identity` instead. That is weaker — it trusts the endpoint rather than
+verifying against chain state — so re-check it against the assignment when the CLI recovers.
+
+**Boot takes ~5 minutes.** The tunnel returned Cloudflare 1033 / HTTP 530 for 280s after
+`acurast deploy` reported success, then came up. Do not read an early 530 as a failed deploy.
+
+### The seed change, verified against the live job
+
+Two different addresses asking for the same `(epoch, k)` now receive the **same** seed, while
+`sessionId` still differs per player — so levels are shared and slot accounting is not:
+
+```
+k=0  player 0x1111…  seed 4289041773203437748   sessionId 0x49274def…
+k=0  player 0x2222…  seed 4289041773203437748   sessionId 0x55ae8f19…
+k=3  player 0x1111…  seed 11682649945149339120  sessionId 0x67e03020…
+k=3  player 0x2222…  seed 11682649945149339120  sessionId 0x3dad64ac…
+```
+
+### Previously: the reasoning for the rotation
+
+Two things changed at once, and only the first is the usual repointing:
+
+1. `CONTRACT` moved to `0xc4fac517…` in `acurast-verifier/.env`. On its own this is an
+   environment variable, not a bundle file, so it would not rotate the signing key.
+2. **`app/verifier.mjs` itself changed** — `deriveSeed` now keys on `(epoch, k)` instead of
+   `sessionId`, with the domain prefix bumped to `rainbow-seed-v2`. Any edit under `app/`
+   changes the bundle, and the key tracks the bundle. So the redeployed job **will** publish
+   a new `secp256k1` key and needs a fresh `setVerifier`.
+
+The last live job on the old contract signed as `0x5332edf5782cb29ee9b37a288ebe25c0cb13c86d`
+(public key `0285cc57…`, read from `/identity`). That address is *not* registered on the new
+contract and should not be — it serves the old `rainbow-seed-v1` levels.
+
+```bash
+acurast deploy                       # canary; app/ changed, so expect a new key
+acurast deployments <id> -n canary   # read the published SECP256k1 key off the assignment
+# derive its H160, then, as owner:
+node scripts/revive-call.mjs --to 0xb359526f0ffa243678e7bed762c6fc96e45c9915 \
+  --data $(cast calldata "setVerifier(address,bool)" 0xNEWKEY true)
+```
+
+Confirm afterwards that `/identity` reports `contract: 0xc4fac517…` and `gameId: 2`, and that
+`isVerifier(0xNEWKEY)` reads true — a mismatch on either is a silent `BadAttestation` at the
+end of somebody's run.
+
+### Previously (job 380406, old contract)
 
 The EIP-712 domain names `verifyingContract`, so an attestation is bound to the address the
 *enclave* was configured with — and the job is still configured with the previous one. Read
@@ -315,9 +408,9 @@ Note the `gameId` is **2**, taken from the verifier's `/identity` rather than fr
 previous "Game 1" row, which had gone stale against the deployed enclave. Ask the thing that
 signs, not the doc.
 
-### Why the roster exists at all, given `NewBest`
+### Why the roster exists at all, given `ScoreRecorded`
 
-The original design said clients rank off-chain from `NewBest` logs, and the contract still
+The original design said clients rank off-chain from `NewBest` (now `ScoreRecorded`) logs, and the contract still
 emits them. **They are unreadable from any Ethereum-shaped client on this chain.** Measured
 against `https://paseo-assethub-rpc.laissez-faire.trade`:
 

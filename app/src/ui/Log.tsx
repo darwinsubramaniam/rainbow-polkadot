@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Attestation } from "../chain/enclave";
 
@@ -12,6 +12,55 @@ interface Props {
   onClose: () => void;
   lines: readonly Line[];
   attestation: Attestation | null;
+}
+
+/**
+ * The log as one block of text, which is the form it is useful in elsewhere.
+ *
+ * The attestation goes in too, and expanded rather than as the collapsed
+ * `<details>` the sheet shows: a copy is taken to be pasted into a bug report or
+ * an issue, and the signed claim is the part that makes the rest checkable.
+ */
+function asText(lines: readonly Line[], attestation: Attestation | null): string {
+  const body = lines.map((l) => l.text).join("\n");
+  if (!attestation) return `${body}\n`;
+  return `${body}\n\nSigned attestation:\n${JSON.stringify(attestation, null, 2)}\n`;
+}
+
+/**
+ * Put text on the clipboard, by whichever route this host allows.
+ *
+ * `navigator.clipboard` needs a secure context, and this app runs in more than
+ * one: a browser on localhost has it, an `http://` deployment does not, and a
+ * host webview may or may not expose it at all. The deprecated `execCommand`
+ * path covers the rest, and being deprecated matters less than a copy button
+ * that silently does nothing on the one build a player is trying to report a
+ * bug from.
+ */
+async function toClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Fall through to the textarea.
+  }
+
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    // Off-screen rather than hidden: `display: none` and `visibility: hidden`
+    // are both unselectable, and the selection is what gets copied.
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.setAttribute("readonly", "");
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -35,6 +84,23 @@ interface Props {
 export function Log({ onClose, lines, attestation }: Props) {
   const sheet = useRef<HTMLDivElement | null>(null);
   const tail = useRef<HTMLDivElement | null>(null);
+
+  // The button says what happened, because a copy is otherwise invisible: the
+  // clipboard is somewhere else, and a button that looks identical before and
+  // after leaves the only way to check being to paste and see.
+  const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
+  const revert = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (revert.current) clearTimeout(revert.current);
+  }, []);
+
+  const copy = async () => {
+    const ok = await toClipboard(asText(lines, attestation));
+    setCopied(ok ? "ok" : "fail");
+    if (revert.current) clearTimeout(revert.current);
+    revert.current = setTimeout(() => setCopied("idle"), 2000);
+  };
 
   // Move focus into the sheet on open, so it is dismissable and navigable from
   // the keyboard rather than only by pointer.
@@ -71,6 +137,16 @@ export function Log({ onClose, lines, attestation }: Props) {
       <div className="sheet-head">
         <h2>Log</h2>
         <span className="note">{lines.length} lines</span>
+        <button
+          className="ghost tiny"
+          onClick={copy}
+          disabled={lines.length === 0}
+          // The label changes under the pointer, so the accessible name is
+          // pinned to the action rather than to its outcome.
+          aria-label="Copy log"
+        >
+          {copied === "ok" ? "Copied" : copied === "fail" ? "Copy failed" : "Copy"}
+        </button>
         <button className="ghost tiny" onClick={onClose}>
           Close
         </button>

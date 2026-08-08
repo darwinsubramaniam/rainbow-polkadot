@@ -1,3 +1,4 @@
+import { BUILD, buildLine } from "../build";
 import { GitHubMark, RainbowMark } from "./Logos";
 import type { Route } from "./useHashRoute";
 
@@ -55,6 +56,15 @@ export function SiteFooter() {
           <p className="foot-warn">
             Prototype. Unaudited, actively experimental, and published for research and developer education. Running on
             the Polkadot Products Devnet — nothing here holds value.
+          </p>
+          {/*
+            Which build you are looking at. Not decoration: a published Product
+            is served from a service-worker VFS behind a gateway that can pin a
+            CID, so a reload can quietly hand you a bundle from several deploys
+            ago. `title` carries the full line for copying into a bug report.
+          */}
+          <p className="foot-build" title={buildLine()}>
+            build <code>{BUILD.commit}</code> · {BUILD.at}
           </p>
         </div>
 

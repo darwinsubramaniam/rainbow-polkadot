@@ -452,6 +452,11 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .overlay .ok { color: #7ee0a8; }
 .overlay .bad,
 .overlay.bad { color: #ff8f8f; }
+/* Lighter than the page's `--warn`, for the same reason `.ok` and `.bad` are:
+   these sit on near-black at .85rem, and the print colour goes muddy there.
+   Amber rather than red — a run that did not beat your best is a standing to
+   improve on, not a failure, and the colour is most of what says which. */
+.overlay .warn { color: #ffd166; }
 
 /**
  * The controls, on the screen rather than under it.
@@ -1191,15 +1196,46 @@ label {
    footnote, rather than by making one look less real than the other. */
 
 .board .panel-head { align-items: center; }
-/* The refresh sits between the heading and the note, so `.note`'s `margin-left:
-   auto` keeps the status pinned right regardless of the button's width. */
-.board .panel-head .tiny { order: 1; }
-.board .panel-head .note { order: 2; }
+/* The scope switch and the refresh sit between the heading and the note, so
+   `.note`'s `margin-left: auto` keeps the status pinned right regardless of
+   their widths. */
+.board .panel-head .seg { order: 1; }
+.board .panel-head > .tiny { order: 2; }
+.board .panel-head .note { order: 3; }
 
 button.tiny {
   font-size: .7rem;
   padding: .2rem .5rem;
   border-radius: 7px;
+}
+
+/* Which board is on screen. Two buttons in one shell rather than a toggle,
+   because both options need naming — "Today" alone would leave the all-time
+   board undiscoverable, and a board whose scope is not stated reads as broken
+   the first time it is legitimately empty. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg button.tiny {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-faint);
+}
+
+.seg button.tiny + button.tiny { border-left: 1px solid var(--line); }
+
+.seg button.tiny:hover:not(:disabled) { color: var(--ink); }
+
+/* `aria-pressed` is the selector, not a class: the styling and the thing a
+   screen reader announces then cannot disagree. */
+.seg button.tiny[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--surface);
 }
 
 .rows {
@@ -1269,6 +1305,10 @@ button.tiny {
   flex: none;
 }
 .tag.bad { background: var(--bad-wash); color: var(--bad); }
+/* A qualifier rather than an accolade. "this device" marks the *weakest* claim
+   on the panel — a number the enclave never saw — so it must not arrive in the
+   accent colour the plain tag wears, which reads as a badge earned. */
+.tag.soft { background: var(--surface-2); color: var(--ink-faint); }
 
 .panel-body > .empty,
 .panel-body > .hint,
@@ -1589,6 +1629,9 @@ td:first-child { font-weight: 600; }
 .foot-brand .rainbow-mark { width: 19px; height: 19px; flex: none; }
 .foot-about { max-width: 36ch; line-height: 1.625; }
 .foot-warn { margin-top: 1.1rem; font-size: .78rem; color: var(--ink-faint); }
+/* Quiet by default — it only needs to be legible when someone goes looking. */
+.foot-build { margin-top: .55rem; font-size: .72rem; color: var(--ink-faint); }
+.foot-build code { font-family: var(--mono, ui-monospace, monospace); font-size: .95em; }
 
 /* Mono micro-heading over each link column — the eyebrow device, dialled down. */
 .foot-head {

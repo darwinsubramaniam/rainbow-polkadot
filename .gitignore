@@ -51,3 +51,4 @@ app/.vite
 # directories are ~2.8 MB of source art and duplicate resolutions that nothing
 # reads. Download from kenney.nl and re-run app/scripts/pack-art.mjs to upgrade.
 kenney_new-platformer-pack-*/
+app/.cdm/contracts/@dw3labs/rainbow-leaderboard/latest

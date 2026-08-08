@@ -38,11 +38,12 @@
  * remaining bytes zeroed, so it is inspectable as a placeholder rather than
  * mistakable for a key that someone holds.
  *
- * The consequence, stated plainly: every guest in a given hour plays the same
- * level at the same attempt index, because the seed derives from this address.
- * Twelve levels an hour, shared by everyone who has not connected a wallet.
- * For a tier whose whole purpose is to show the machine working, that is fine —
- * and it is one line to revisit if it ever stops being fine.
+ * This used to carry a caveat — that every guest shares a level, because the
+ * seed derived from this address — offered as an acceptable cost for the guest
+ * tier alone. The seed no longer derives from the player at all, so a guest now
+ * plays exactly the level everyone else is playing, and the caveat has become
+ * the design. What this address still does is pick the character sprite and keep
+ * guest sessions in their own storage slot.
  */
 export const GUEST_PLAYER = "0x6775657374000000000000000000000000000000";
 

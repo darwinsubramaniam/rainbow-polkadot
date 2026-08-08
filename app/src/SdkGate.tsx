@@ -96,6 +96,28 @@ export function SdkGate({ children, onStandalone }: Props) {
     );
 
     const connected = (app: App) => {
+      // Already settled — by the timeout, by a rejection, or by this effect
+      // being cleaned up — so nothing will ever hold this `app`. Drop it.
+      //
+      // Dropping genuinely leaks: `createApp` opens a host transport during
+      // construction, and React StrictMode makes an abandoned one the *normal*
+      // development path — the effect runs, is cleaned up, and runs again, so
+      // the first `createApp` resolves after `settled` is already true.
+      //
+      // **There is no safe teardown to call here, and reaching for the obvious
+      // one broke submitting.** `app.chain.destroyAll()` reads like an instance
+      // method and is not: it delegates to a *module-level* `destroyAll()` in
+      // `@parity/product-sdk-chain-client`, which empties a client registry
+      // shared by every `App` in the tab. Calling it on the abandoned app
+      // therefore destroys the connections the *live* one is using, and the next
+      // contract call fails `Host provider is disconnected` — several steps
+      // later, with nothing pointing back here. Measured, not theorised: it took
+      // a working submit path to failing on every attempt.
+      //
+      // So the leak stays until the SDK offers per-app disposal. It costs an
+      // idle transport in development and nothing in a build, where the effect
+      // runs once. That is strictly cheaper than severing the one connection
+      // that matters.
       if (settled) return;
       settled = true;
       clearTimeout(timer);

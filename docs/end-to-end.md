@@ -50,13 +50,36 @@ hash equals the one registered on-chain for the game.
 get anything signed. The enclave builds the EIP-712 digest itself, and it was verified
 byte-identical to the deployed contract's `scoreDigest` before deployment.
 
-**The seed is secret.** `seed = keccak256(signer_sign("rainbow-seed-v1" ‖ sessionId))`.
-`signer_sign` is deterministic (RFC 6979, measured in E0.3) and its key never leaves the
-secure element, so this is a PRF the player cannot evaluate offline. `sessionId` is public;
-the seed it maps to is not — which is what stops seed shopping.
+**The seed is shared, and unforgeable.**
+`seed = keccak256(signer_sign("rainbow-seed-v2" ‖ epoch ‖ k))`. `signer_sign` is
+deterministic (RFC 6979, measured in E0.3) and its key never leaves the secure element, so
+nobody can compute a seed offline or invent one for the enclave to replay against.
+
+Note what is **not** in the preimage: the player. Everyone playing slot `k` of a given hour
+faces the same level, which is what makes two scores on one board comparable. Keying on
+`sessionId` — as this did until the daily board landed — was wrong twice over:
+
+- Scores earned on different levels are not comparable. Over 20,000 seeds of this
+  `sim.wasm`, a level carries 17–56 coins and 0–17 enemies, so a *perfect* run is worth
+  5,100–11,000 points on the draw alone (p5–p95 spread 2,500, median 7,700).
+- It did not bound grinding either. `maxSessionsPerEpoch` caps seeds per **address**,
+  `POST /session` is unauthenticated and derives for any address named, `sim.wasm` is
+  published, and the contract credits the `player` inside the signed claim rather than
+  `msg.sender`. Mint a thousand addresses, pull twelve seeds each, generate all twelve
+  thousand levels locally, play the friendliest, be credited to whichever address drew it.
+
+The cost, stated rather than buried: an input log is now portable. A route another player
+publishes can be replayed, attested and submitted by anyone for the same score. That is the
+daily-puzzle trade — copying still spends one of the copier's twelve slots, and an attested
+replay of someone else's route is in any case indistinguishable from playing it well.
+
+> The signing key is per-deployment, so a redeployed verifier serves *different* levels for
+> the same `(epoch, k)`. Always true, invisible while seeds were per-player; use
+> `reuseKeysFrom` across redeployments if two verifiers must agree on what today's levels
+> are.
 
 > **Caveat, stated rather than buried:** this reuses the attestation key as a PRF. The
-> distinct `"rainbow-seed-v1"` prefix keeps preimages disjoint from any EIP-712 digest, so
+> distinct `"rainbow-seed-v2"` prefix keeps preimages disjoint from any EIP-712 digest, so
 > it cannot be coerced into producing an attestation. A separate HD-derived key
 > (`signer_sign` supports `derivationPath` on secp256k1) would still be cleaner and is the
 > right fix before this carries any value.

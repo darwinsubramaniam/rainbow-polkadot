@@ -1,3 +1,62 @@
+// ## Why `@parity/product-sdk` is pinned to 0.19.1, exactly, and must not float
+//
+// The SDK version this app can use is set by the *installed Polkadot Desktop
+// build*, not by npm's `latest`. App and host are two independent
+// implementations of one SCALE wire protocol, and there is no negotiation step:
+// if the two disagree about a type's shape, the bytes are simply misread.
+//
+// `@parity/truapi` 0.6.0 changed `DerivationIndex` from `u32` to
+// `TaggedUnion({Left: u32, Right: Hex(32)})` — one extra tag byte. It sits
+// inside `ProductAccountId`, which is the first field of
+// `ProductAccountTxPayload`, so that byte shifts *every field after the signer*.
+// The host then reads the `extensions` vector length out of garbage, gets an
+// enormous count, and runs off the end of the buffer:
+//
+//     Transport error RangeError: Offset is outside the bounds of the DataView
+//
+// It fires the moment a contract write is submitted. The transaction never
+// reaches the phone, and the account's nonce stays 0 — the extrinsic is
+// destroyed inside the host before it is ever sent. That is the "signing is
+// accepted and then never answered" failure, and it is why `submit.ts` could
+// dry-run successfully and still land nothing.
+//
+// Crucially, **account resolution working proves nothing about compatibility**.
+// `HostAccountGetRequest` carries only the account, so the host reads 4 of the 5
+// bytes as 0 and ignores the trailing one — nothing follows to misalign. Signing
+// is the first message with fields after the signer, so it is the first to break.
+//
+//     product-sdk 0.19.1 → sdk-host 0.14.1 → truapi ^0.5.0 → 0.5.1   ✅
+//     product-sdk 0.20.0 → sdk-host 0.15.0 → truapi ^0.6.0           ❌
+//     product-sdk 0.20.1 → sdk-host 0.15.1 → truapi ^0.7.0           ❌
+//
+// 0.19.1 is the newest release wire-compatible with a Desktop carrying host-api
+// 0.8.10. Verified against the installed binary rather than copied from the
+// reference apps, which sit four minors back on 0.15.1:
+//
+//     npx @electron/asar extract-file \
+//       "/Applications/Polkadot Desktop Dev.app/Contents/Resources/app.asar" \
+//       node_modules/@novasamatech/host-api/dist/protocol/v1/accounts.js
+//
+// That host declares `DerivationIndex = u32` and
+// `ProductAccountId = Tuple(DotNsIdentifier, DerivationIndex)`; truapi 0.5.1
+// declares `Struct({dotNsIdentifier: str, derivationIndex: u32})`. SCALE encodes
+// `Struct` and `Tuple` identically, so those agree byte for byte.
+//
+// `package.json` therefore carries **no caret** on `@parity/product-sdk` or
+// `@parity/product-sdk-tx`, and pins `@parity/truapi` directly even though
+// nothing imports it — it is the wire-critical package and is otherwise only
+// transitive, so a pin is the only place the constraint is visible. This
+// previously read `"@parity/product-sdk": "*"`, which is how the tree drifted
+// onto 0.20.1 in the first place.
+//
+// Two consequences in the code: `SmartContractAllowance` takes a plain `u32`
+// here, not a `{ tag: "Left" }` union (see `wallet.ts`), and
+// `product-sdk-contracts` 0.9.2 has no `isContractAccountMapped` (see
+// `submit.ts`). Both are downgrades of convenience, not of capability.
+//
+// Before bumping any of these, re-extract the host's `accounts.js` and diff it
+// against `node_modules/@parity/truapi/dist/generated/types.js`.
+
 import { devnet_asset_hub } from "@parity/product-sdk-descriptors/devnet-asset-hub";
 import { paseo_asset_hub } from "@parity/product-sdk-descriptors/paseo-asset-hub";
 import { polkadot_asset_hub } from "@parity/product-sdk-descriptors/polkadot-asset-hub";
@@ -65,28 +124,11 @@ export const ASSET_HUB = {
 export const CLOUD_STORAGE: { environment: "devnet" | "paseo" } | false =
   NETWORK === "polkadot" ? false : { environment: NETWORK };
 
-/**
- * The leaderboard contract on this network.
- *
- * Overridable with `VITE_CONTRACT` so a redeploy does not need a code change.
- * Only devnet has an address today; the others are deliberately absent rather
- * than guessed, so a premature paseo build fails loudly here instead of sending
- * transactions to an address that means nothing on that chain.
- *
- * Redeployed 2026-07-30 to add the board views (`playerCount`, `board`), which
- * the previous address does not have — it answers `best` correctly and reverts
- * on anything a leaderboard needs.
- *
- * Changing this address is never only a client change. The EIP-712 domain names
- * `verifyingContract`, so the enclave's signature is bound to whichever address
- * *it* was configured with: the same claim yields digest `0x10e24cc4…` here and
- * `0x477d099a…` on the old deployment, both read from the two live contracts. An
- * attestation signed for one is refused by the other as `BadAttestation`. The
- * Acurast job's `CONTRACT` env must therefore move in step with this constant.
- */
-const DEPLOYED: Partial<Record<Network, string>> = {
-  devnet: "0x891548f5268FA27B68553eb4841f9246b38A16fA",
-};
+// The leaderboard address used to be a `DEPLOYED` table here. It is now
+// `cdm.json`'s — see `contract.ts` — installed by
+// `cdm i -n devnet @dw3labs/rainbow-leaderboard` and kept next to the ABI it
+// has to agree with. `VITE_CONTRACT` still overrides it, and the EIP-712
+// warning that lived on this constant moved there with it.
 
 /**
  * The dotNS name this Product is published under.
@@ -135,14 +177,3 @@ export const CONTRACT_ACCOUNT_INDEX = 0;
  */
 export const GAME_ID = Number(import.meta.env.VITE_GAME_ID ?? 2);
 
-export const CONTRACT: string = (() => {
-  const override = import.meta.env.VITE_CONTRACT;
-  if (override) return override;
-  const known = DEPLOYED[NETWORK];
-  if (!known) {
-    throw new Error(
-      `no leaderboard contract recorded for "${NETWORK}" — deploy one and pass VITE_CONTRACT`,
-    );
-  }
-  return known;
-})();
