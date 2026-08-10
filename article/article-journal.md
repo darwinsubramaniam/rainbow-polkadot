@@ -42,6 +42,243 @@ well gets a full image-AI prompt for Darwin to run instead.
 
 ## Round log (newest first)
 
+### Round 7 — 2026-08-09 — Darwin's rewrite replaces article.md wholesale
+
+**Darwin supplied a full replacement draft and asked for it verbatim.** Written in as
+given, no edits. It supersedes rounds 2–6 as the article's text (those rounds' *facts*
+survive in it; their prose does not).
+
+**What changed in character:** long-form narrative → numbered technical explainer, 19
+sections, short declarative paragraphs, plain "application/computation" register instead
+of the earlier voice. Rainbow now appears from §7, with §1–§6 covering Product, `.dot`
+identity, Devnet, host-as-browser, Acurast, and the enclave — the ingredients-first order
+agreed in round 5, kept.
+
+**Facts from earlier rounds that the new draft preserves:** two-stage publishing (register
+the name, then publish and associate content) from round 6; the host-as-specialised-browser
+mapping table from round 4; DotNS resolving to a **content hash** rather than a location
+from round 4's correction; devnet-is-its-own-ecosystem; no-score-is-ever-sent; the
+keccak-256 rules pin; EIP-712 domain binding; all 13 references.
+
+**Regression to resolve — every diagram embed is gone.** The draft carries no images, so
+D1–D10 are no longer referenced anywhere. The Figma page and `images/` are untouched and
+still current; the diagrams simply need re-placing into the new section numbering. Best
+fits, when Darwin wants them back:
+| Diagram | Section |
+|---|---|
+| D2 — An app with no server | §1 |
+| D8 — What is the Product Devnet | §3 |
+| D10 — A browser for chain-hosted apps | §4 (its table duplicates §4's table — pick one) |
+| D9 — What is Acurast | §5 |
+| D4 — The key ceremony | §6 |
+| D1 — Four actors | §7 |
+| D5 — The journey of one run | §9 |
+| D6 — Three cheats, three failures | §13 |
+| D7 — Not a game, a pattern | §15 |
+| D3 — Cloud in a drawer | §5, if §5 wants a second image |
+
+**Two other open items in the new text:**
+- The three host repos are listed by name without URLs in §4 and §19. The verified links
+  are in round 4 above.
+- `**TODO: repo URL**` in §19 still needs the project's own repository.
+
+**Terminology conflict, flagged for Darwin's decision.** The new title is *"Your Phone as
+the Backend"*. Round 2 deliberately chose "**a** Phone as the Backend Server" over "your",
+because Darwin's own round-2 feedback was that readers were misreading the verifying phone
+as the *player's* phone — which is what produced the standing "Acurast cloud phone"
+naming rule. §5 and §15 of the new draft do say the computation happens on another,
+independently operated phone, so the body is unambiguous; only the title reads as "your
+phone does the backend work". Left exactly as written pending Darwin's call.
+
+### Round 6 — 2026-08-09 — correction: how a name actually becomes an identity
+
+**Wrong claim, flagged by Darwin:** the article said *"the app's on-chain account is
+mathematically derived from the name string itself… rename the app and you have created a
+different identity."* That skipped the registration entirely and implied a `.dot` name is
+free text you pick at build time.
+
+**The actual order:**
+1. **Register the name in DotNS** — it lives in a smart contract on Polkadot's Asset Hub.
+   From that moment the name is owned on chain.
+2. **Upload the application to the Bulletin chain and link it to the registered name.**
+   Claim the address, then put something at it; shipping a new version relinks the same
+   name to new content.
+3. The host then derives the app's account **from the registered name**, one account per
+   app *and* per user (`ProductAccountId = (DotNsIdentifier, DerivationIndex)`).
+
+The war story still holds and is now told against the right mechanism — an early build
+passed `dappName: "Rainbow"`, the SDK appended `.dot` and asked the host to derive
+`Rainbow.dot`, which nobody had registered; the host refused, **and the refusal resolved
+as an empty account list rather than an error** (`app/src/chain/wallet.ts:29-42`).
+
+**Fixed in three places:** `article.md` (the paragraph rewritten into two — registration,
+then upload-and-link), `draft-outline.md` §1 (the original source of the bad sentence,
+now carrying an explicit do-not-write note), and **D2 in Figma**, whose step order was
+wrong for the same reason.
+
+**D2 rebuilt (node `10:2`)** — steps now follow the real publishing sequence:
+| # | Was | Now |
+|---|---|---|
+| 1 | Bulletin chain — "Published once" | **DotNS name — "Register the name first"** |
+| 2 | Polkadot app — "Loaded from the chain" | **Bulletin chain — "Upload, and link it"** |
+| 3 | Host wallet — "The wallet is lent" | Polkadot app — "Loaded from the chain" |
+| 4 | DotNS name — "The name is the identity" *(wrong)* | Host wallet — "The wallet is lent" |
+
+Accents were remapped so colour now means something: the two chain-side steps are violet,
+the two host-side steps amber. Subtitle de-Rainbowed to "How a Product gets published —
+and how it reaches someone", per round 5's restructure.
+
+**Still pending:** `images/D2.png` deliberately not exported — D2 is one of the six
+diagrams awaiting Darwin's image-AI pass, and its blueprint has just changed, so it should
+be enhanced from the corrected Figma frame rather than half-filled with a raw export.
+
+### Round 5 — 2026-08-09 — restructured: ingredients first, game last
+
+**Feedback (Darwin):** "I don't like the article structure — first explain the Polkadot
+Product, then what is Acurast, then later come to the Rainbow." This restores the
+original brief in *Planned structure* above, which rounds 2–4 had drifted from by opening
+on the game.
+
+**Decisions (Darwin, asked before rewriting):**
+- Opening = **"Two ingredients, then the dish"** — frame both technologies as the
+  subject, name Rainbow once as a forward reference, then leave it alone.
+- Title = **unchanged**; standfirst retuned so it no longer opens on "a browser game".
+
+**New order:**
+| # | Section | Role |
+|---|---|---|
+| 1 | Two ingredients | frames both, no game content |
+| 2 | An app with no server | **Polkadot Product** |
+| 3 | And the "devnet" in the title | Devnet (D8) |
+| 4 | The browser you have not heard of | the hosts (D10) |
+| 5 | The cloud in a drawer | **Acurast** (D9, D3) |
+| 6 | The vault inside the phone | the enclave (D4) |
+| 7 | The dish — a game that cannot lie | **Rainbow starts** (D1) |
+| 8 | Assembling the machine | determinism + replay (D5) |
+| 9 | The sealed envelope | EIP-712 handover (D6) |
+| 10 | Not a game — a pattern | generalization (D7) |
+| 11–12 | Limitations · Want the details? | unchanged |
+
+**What moved, and the de-Rainbowing that came with it:**
+- The old hook "The score that can't lie" is **gone as an opening**; its two strongest
+  paragraphs (the unfakeable-number claim, the *"the game is a strawman"* quote) now open
+  section 7, together with D1 and the four-actors paragraph, which moved wholesale.
+- Section 2 no longer opens "Rainbow is a Polkadot Product" — it defines the Product
+  first, and `rainbow-dev.dot` is introduced as "the Product this article keeps using as
+  its example" at the point where the name-is-the-identity fact needs it.
+- The Acurast "not the player's phone" clarification was rewritten generically — *the
+  phone doing the computing is never the phone of the person using the app* — because it
+  now lands before the player exists in the article.
+- "Rainbow's team measured this" → "This project measured that", in section 6.
+- Section 5's opener now carries the hand-off: hosting is solved, computing is not, and a
+  browser is the one machine you can never believe.
+
+**Unchanged on purpose:** every claim, reference number, and diagram. This round moved
+prose, it did not re-argue anything. ~3,580 words.
+
+### Round 4 — 2026-08-09 — the host is a browser (D10)
+
+**Feedback (Darwin):** explain that Polkadot Desktop and the Polkadot App (mobile) are
+browsers specialised for loading Web3 content.
+
+**Done:**
+- **D10 "A browser — for apps that live on a chain"** (node `24:2`) — two host cards
+  (Desktop / mobile) over a six-row mapping table: URL→`.dot` name, DNS lookup→DotNS
+  lookup, web server→Bulletin, tab sandbox→Product sandbox, camera prompt→signer
+  approval, Chrome/Safari/Firefox→Polkadot Desktop/App. Amber zone color.
+
+**Host repos added (Darwin, same round)** — and they turned out to be far better evidence
+than the SDK docstring alone. All three are public, GPL-3.0, last pushed 2026-07-28, under
+`github.com/Polkadot-Community-Foundation/`:
+| Repo | GitHub description | Language |
+|---|---|---|
+| `polkadot-desktop-community` | "Polkadot Desktop prototype" | TypeScript |
+| `polkadot-android-community` | "Polkadot Android **user-agent** prototype" | Kotlin |
+| `polkadot-ios-community` | "Polkadot iOS **user-agent** prototype" | Swift |
+
+Three finds worth keeping:
+- The desktop README's own tagline is *"A desktop browser for Polkadot applications"*, and
+  its first feature reads *"Type a dotNS name and the app's content resolves on-chain,
+  loads from the Bulletin Chain / IPFS, and renders in a tab. No DNS, no hosting servers."*
+  That is D10's entire mapping, in the product's own words.
+- **"user-agent"** is the web's own term for a browser — so the analogy is the projects'
+  naming, not the article's invention.
+- The sandbox prompt lists *"the camera, signing, storage, notifications, or the network"*
+  — signing sits in the same permission list as the camera, grantable and revocable per
+  app. D10's permission row was rewritten to say exactly that, and the prose now leans on
+  it as "the whole security model, stated as a settings screen".
+Also noted in prose: all three carry a prototype / not-audited warning, and the desktop can
+delegate signing to the phone over QR so keys never leave it. The repo links are in the
+browser section and in "Want the details?".
+
+**Correction (Darwin, same round): "the URL is the DotNS."** The first cut of D10 split
+naming across two rows as though a `.dot` name and DotNS were different layers — "you
+open a name" then "DotNS turns it into a hash". Wrong emphasis: `rainbow-dev.dot` *is*
+the URL, not a label pointing at one, and DotNS is the address layer as well as the
+lookup. Rows 1–2 are now "The URL you type → The URL is a DotNS name" and "DNS looks it
+up, returns an IP → DotNS looks it up, returns a content hash", the closing line reads
+"the DotNS name is the URL", and the prose leads with the address before the lookup.
+Standing rule for any future diagram or prose: **do not describe DotNS as merely the
+DNS of this stack — it is the URL.**
+- New article section **"The browser you have not heard of"**, placed between the devnet
+  section and the Acurast section — it answers "if there is no server, what opens the app?"
+- The analogy is anchored, not decorative: `docs/host-api-conformance.md` quotes the SDK's
+  own docstring — a Product "is designed to run exclusively inside a host container
+  (Polkadot Browser / Desktop)" and throws with **no direct-WebSocket fallback**. Parity
+  calls the host a browser; the article just points at that.
+- Also written: where the analogy *stops* — a normal browser gates the camera, this one
+  gates your keys — and the honest footnote that E0.1 passed on the desktop path only,
+  with the mobile webview recorded as untested (`docs/E0.1-product-sandbox.md`,
+  `docs/E0.3-E0.4-acurast.md` status table).
+
+**Darwin's enhanced images landed and are now wired in:** `D8_V2.png` (byte-identical to
+`What is PolkadotDevnet.png`) and `What is Acuraast.png` → copied to `D9_V2.png` for a
+space-free path. The article now embeds the enhanced versions; the raw exports
+`D8.png`/`D9.png` are kept as the blueprints.
+
+**Two things to check in the enhanced Acurast image:**
+- Its lifecycle strip shows **five** stages, adding "VERIFIED" after DONE. Acurast's
+  documented deployment lifecycle is OPEN → MATCHED → ASSIGNED → DONE
+  (`research/acurast-docs-research.md` §5). The prose says four; the image says five.
+- Card 3's body reads "For critical jobs executions use a Core device" — the source line
+  was "developers use a Core device". Minor, but it is grammatically broken.
+
+### Round 3 — 2026-08-08 — the two missing definitions (D8, D9)
+
+**Feedback (Darwin):** the article never actually tells the reader *what* a Polkadot
+Product Devnet is, or *what* Acurast is — and the purpose of the Devnet should be
+carried by a diagram, built in Figma.
+
+**Done:**
+- **D8 "What is the Polkadot Product Devnet?"** (node `18:2`) — definition band, the
+  resolution path as chips (`rainbow-dev.dot` → light client → DotNS contenthash →
+  Bulletin over Bitswap → locked sandbox), four purpose cards (whole stack / nothing at
+  stake / proof before production / its own chain), and the two doors. Amber zone color,
+  matching D2's browser-and-app language.
+- **D9 "What is Acurast?"** (node `21:2`) — definition band quoting the docs' own framing,
+  four cards (network / workload / processor / the difference), and the deployment
+  lifecycle OPEN → MATCHED → ASSIGNED → DONE. Teal zone color, matching D3.
+- Both built with the established token set (bg #14162B, card #1E2140, Inter,
+  44/20/22/15.5, 34px badges, 1.5px zone strokes at 55%).
+- `article.md`: new section **"And the 'devnet' in the title"** after "An app with no
+  server"; the Acurast section opening rewritten to define the network before telling
+  the phone's story. Includes the silent-environment trap (devnet Bulletin ≠ Paseo
+  Bulletin) as the one named gotcha.
+
+**Deviation from the image workflow, on purpose:** D8/D9 currently embed the *raw Figma
+export*, not an enhanced PNG, so the article renders complete today. They should go
+through the same image-AI pass as D5 — the Figma frames are the base.
+
+**Sourcing note:** the Darwin Knowledge vault could not be read this session — both the
+`obsidian-vault` MCP server and the shell are blocked from
+`Library/CloudStorage/…/Darwin Knowledge` by macOS TCC (same block recorded in project
+memory for launchd). Definitions were taken instead from `research/acurast-docs-research.md`
+(itself vault- and docs-anchored, every claim carrying its official URL) and from the
+repo's own `docs/DEVELOPER-GUIDE.md`, `docs/deployment-devnet.md`,
+`docs/E0.1-product-sandbox.md` and `README.md`. The MUST-NOT-CLAIM flags were respected:
+no TrustZone/StrongBox/Keystore claims, and the compute-unit figure is given as
+"at the time of writing".
+
 ### Round 2 — 2026-07-31 — decisions locked + first Figma diagrams
 
 **Decisions (Darwin):** outline approved · publication = **Medium** · title direction =
@@ -81,6 +318,9 @@ richly illustrated (gamepad, Acurast rack, sealed chip, PROVED magnifier).
 | D5 | The journey of one run | `3:2` | ✅ images/D5.png |
 | D6 | Three cheats, three failures | `11:32` | ✅ built with red CHEAT badges + colored WALL chips |
 | D7 | Not a game — a pattern | `12:2` | pending |
+| D8 | What is the Polkadot Product Devnet? | `18:2` | ✅ images/D8_V2.png |
+| D9 | What is Acurast? | `21:2` | ✅ images/D9_V2.png |
+| D10 | A browser — for apps that live on a chain | `24:2` | ⚠️ raw Figma export in `images/D10.png` |
 
 **Also done this round:** full first draft of the article written → `article.md`
 (~2,000 words, all 9 sections, 13 numbered references + background refs, images

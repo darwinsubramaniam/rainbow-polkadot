@@ -43,8 +43,12 @@ Plain-language: what it means that the app itself lives on a blockchain. Publish
 Bulletin chain under a human-readable name (`rainbow-dev.dot`), loaded by the Polkadot
 app, running in a sandbox. It holds no keys and opens no connections of its own — the
 wallet and the chain access are *lent to it* by the host, and the user approves what it
-may do. The surprising part: the name IS the identity — the account is mathematically
-derived from `rainbow-dev.dot`.
+may do. The surprising part: the name IS the identity — but note the order, corrected by
+Darwin 2026-08-09: you **register the `.dot` name in DotNS first** (it lives in a smart
+contract on Asset Hub), and *then* upload the app to Bulletin and link it to the name you
+own. The host derives the app's account from that registered name, per app and per user.
+Do NOT write that the account is "mathematically derived from the name string" — that
+skips the registration and implies a name is free text you can pick at build time.
 - Capability message: you can ship an app that no company hosts, no server runs, and
   whose wallet access is controlled by the user's own host app.
 - **Diagram D2**: "Where does this app actually live?"
